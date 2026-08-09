@@ -2,107 +2,106 @@
 // =============================================================================
 // Multi-Timeframe Trend Structure — BACKTEST STRATEGY (TradingView only)
 // -----------------------------------------------------------------------------
-// Backtesting is done here, in TradingView's Strategy Tester. This mirrors the
-// indicator's logic but uses strategy.entry/close so you can measure the edge:
+// This is a strategy() script, so results appear in the Strategy Tester tab.
 //   * 4H trend from market structure (HH/HL = UP, LH/LL = DOWN; both legs must
 //     break to flip).
-//   * Enter long/short only when 5m, 15m, 30m and 1H all align with the new 4H
-//     trend.
-//   * Exit when the 4H trend flips against the position.
-// Run it on the chart timeframe you want signals evaluated on (e.g. 5m) so the
-// alignment timeframes are all >= chart resolution.
+//   * Enter long/short only when 5m, 15m, 30m and 1H all align with the 4H
+//     trend (toggle "Require alignment" off to trade every 4H flip instead).
+//   * Exit when the 4H trend flips against the position (optional structure SL).
+//
+// TIP: run it on 15m or 1H so the alignment timeframes are >= chart resolution
+// and you get a healthy number of trades. If you see 0 trades, uncheck
+// "Require 5m/15m/30m/1H alignment" first to confirm signals are firing.
 // =============================================================================
 strategy("MTF Trend Structure — Backtest", overlay=true,
      default_qty_type=strategy.percent_of_equity, default_qty_value=100,
      initial_capital=10000, commission_type=strategy.commission.percent,
      commission_value=0.05, pyramiding=0, calc_on_every_tick=false,
-     process_orders_on_close=true)
+     process_orders_on_close=true, max_labels_count=500)
 
 // ----------------------------------------------------------------------------- Inputs
 grpStruct = "Market Structure"
 pivotLen  = input.int(5, "Pivot lookback (bars each side)", minval=1, group=grpStruct)
 trendTF   = input.timeframe("240", "Trend timeframe", group=grpStruct)
 
-grpAlign  = "Entry Alignment Timeframes"
-tf1 = input.timeframe("5",  "Alignment TF 1", group=grpAlign)
-tf2 = input.timeframe("15", "Alignment TF 2", group=grpAlign)
-tf3 = input.timeframe("30", "Alignment TF 3", group=grpAlign)
-tf4 = input.timeframe("60", "Alignment TF 4", group=grpAlign)
+grpAlign  = "Entries"
+requireAlign = input.bool(true, "Require 5m/15m/30m/1H alignment", group=grpAlign,
+     tooltip="Off = enter on every confirmed 4H trend flip (more trades to inspect).")
+tf1 = input.timeframe("5",  "Align TF 1", group=grpAlign)
+tf2 = input.timeframe("15", "Align TF 2", group=grpAlign)
+tf3 = input.timeframe("30", "Align TF 3", group=grpAlign)
+tf4 = input.timeframe("60", "Align TF 4", group=grpAlign)
+allowLong  = input.bool(true, "Allow longs",  group=grpAlign)
+allowShort = input.bool(true, "Allow shorts", group=grpAlign)
 
 grpTest   = "Backtest"
-allowLong  = input.bool(true,  "Allow long trades",  group=grpTest)
-allowShort = input.bool(true,  "Allow short trades", group=grpTest)
-useDateFilter = input.bool(false, "Filter by date range", group=grpTest)
-startDate = input.time(timestamp("2023-01-01 00:00"), "Start", group=grpTest)
-endDate   = input.time(timestamp("2026-12-31 00:00"), "End",   group=grpTest)
-useStop   = input.bool(false, "Use stop-loss (structure low/high)", group=grpTest)
+useStop   = input.bool(false, "Structure stop-loss", group=grpTest,
+     tooltip="Stop at the lowest low / highest high of the last N bars.")
+stopLook  = input.int(20, "Stop lookback (bars)", minval=2, group=grpTest)
+useDates  = input.bool(false, "Filter by date range", group=grpTest)
+startD    = input.time(timestamp("2020-01-01 00:00"), "Start", group=grpTest)
+endD      = input.time(timestamp("2027-01-01 00:00"), "End",   group=grpTest)
 
 // ----------------------------------------------------------------------------- Structure engine
-f_trend_state() =>
+f_state() =>
     ph = ta.pivothigh(pivotLen, pivotLen)
     pl = ta.pivotlow(pivotLen, pivotLen)
-    var float lastPH = na, var float prevPH = na
-    var float lastPL = na, var float prevPL = na
-    var int   state  = 0
+    var float lph = na
+    var float pph = na
+    var float lpl = na
+    var float ppl = na
+    var int   st  = 0
     if not na(ph)
-        prevPH := lastPH, lastPH := ph
+        pph := lph
+        lph := ph
     if not na(pl)
-        prevPL := lastPL, lastPL := pl
-    hh = not na(lastPH) and not na(prevPH) and lastPH > prevPH
-    lh = not na(lastPH) and not na(prevPH) and lastPH < prevPH
-    hl = not na(lastPL) and not na(prevPL) and lastPL > prevPL
-    ll = not na(lastPL) and not na(prevPL) and lastPL < prevPL
-    if hh and hl and state != 1
-        state := 1
-    if lh and ll and state != -1
-        state := -1
-    [state, lastPL, lastPH]
+        ppl := lpl
+        lpl := pl
+    hh = not na(lph) and not na(pph) and lph > pph
+    lh = not na(lph) and not na(pph) and lph < pph
+    hl = not na(lpl) and not na(ppl) and lpl > ppl
+    ll = not na(lpl) and not na(ppl) and lpl < ppl
+    if hh and hl and st != 1
+        st := 1
+    if lh and ll and st != -1
+        st := -1
+    st
 
-[htfState, _hLo, _hHi] = request.security(syminfo.tickerid, trendTF, f_trend_state(),
-     lookahead=barmerge.lookahead_off)
-
-f_state_only() =>
-    [s, _a, _b] = f_trend_state()
-    s
-s1 = request.security(syminfo.tickerid, tf1, f_state_only(), lookahead=barmerge.lookahead_off)
-s2 = request.security(syminfo.tickerid, tf2, f_state_only(), lookahead=barmerge.lookahead_off)
-s3 = request.security(syminfo.tickerid, tf3, f_state_only(), lookahead=barmerge.lookahead_off)
-s4 = request.security(syminfo.tickerid, tf4, f_state_only(), lookahead=barmerge.lookahead_off)
-
-// structure stop levels from the trend timeframe swings
-htfSwingLow  = request.security(syminfo.tickerid, trendTF, ta.valuewhen(not na(ta.pivotlow(pivotLen, pivotLen)),  ta.pivotlow(pivotLen, pivotLen),  0), lookahead=barmerge.lookahead_off)
-htfSwingHigh = request.security(syminfo.tickerid, trendTF, ta.valuewhen(not na(ta.pivothigh(pivotLen, pivotLen)), ta.pivothigh(pivotLen, pivotLen), 0), lookahead=barmerge.lookahead_off)
+htf = request.security(syminfo.tickerid, trendTF, f_state(), lookahead=barmerge.lookahead_off)
+a1  = request.security(syminfo.tickerid, tf1, f_state(), lookahead=barmerge.lookahead_off)
+a2  = request.security(syminfo.tickerid, tf2, f_state(), lookahead=barmerge.lookahead_off)
+a3  = request.security(syminfo.tickerid, tf3, f_state(), lookahead=barmerge.lookahead_off)
+a4  = request.security(syminfo.tickerid, tf4, f_state(), lookahead=barmerge.lookahead_off)
 
 // ----------------------------------------------------------------------------- Alignment
-allUp   = htfState == 1  and s1 == 1  and s2 == 1  and s3 == 1  and s4 == 1
-allDown = htfState == -1 and s1 == -1 and s2 == -1 and s3 == -1 and s4 == -1
+alignUp   = not requireAlign or (a1 == 1  and a2 == 1  and a3 == 1  and a4 == 1)
+alignDown = not requireAlign or (a1 == -1 and a2 == -1 and a3 == -1 and a4 == -1)
 
-inWindow = not useDateFilter or (time >= startDate and time <= endDate)
+longOK  = allowLong  and htf == 1  and alignUp
+shortOK = allowShort and htf == -1 and alignDown
+inWin   = not useDates or (time >= startD and time <= endD)
 
 // ----------------------------------------------------------------------------- Orders
-longSig  = allowLong  and allUp   and inWindow
-shortSig = allowShort and allDown and inWindow
-
-if longSig and strategy.position_size <= 0
+if inWin and longOK and strategy.position_size <= 0
     strategy.entry("Long", strategy.long)
-    if useStop and not na(htfSwingLow)
-        strategy.exit("Long-SL", "Long", stop=htfSwingLow)
+    if useStop
+        strategy.exit("Long-SL", "Long", stop=ta.lowest(low, stopLook))
 
-if shortSig and strategy.position_size >= 0
+if inWin and shortOK and strategy.position_size >= 0
     strategy.entry("Short", strategy.short)
-    if useStop and not na(htfSwingHigh)
-        strategy.exit("Short-SL", "Short", stop=htfSwingHigh)
+    if useStop
+        strategy.exit("Short-SL", "Short", stop=ta.highest(high, stopLook))
 
 // Exit when the 4H trend flips against the open position.
-if strategy.position_size > 0 and htfState == -1
+if strategy.position_size > 0 and htf == -1
     strategy.close("Long", comment="4H DOWN")
-if strategy.position_size < 0 and htfState == 1
+if strategy.position_size < 0 and htf == 1
     strategy.close("Short", comment="4H UP")
 
 // ----------------------------------------------------------------------------- Visuals
-trendTxt = htfState == 1 ? "UPTREND" : htfState == -1 ? "DOWNTREND" : "NEUTRAL"
-trendCol = htfState == 1 ? color.green : htfState == -1 ? color.red : color.gray
-bgcolor(htfState == 1 ? color.new(color.green, 92) : htfState == -1 ? color.new(color.red, 92) : na)
+trendTxt = htf == 1 ? "UPTREND" : htf == -1 ? "DOWNTREND" : "NEUTRAL"
+trendCol = htf == 1 ? color.green : htf == -1 ? color.red : color.gray
+bgcolor(htf == 1 ? color.new(color.green, 90) : htf == -1 ? color.new(color.red, 90) : na)
 var table info = table.new(position.top_right, 1, 2, border_width=1)
 if barstate.islast
     table.cell(info, 0, 0, "4H TREND", text_color=color.white, bgcolor=color.new(color.black, 20))
