@@ -79,6 +79,12 @@ class Config:
     poll_seconds: int = int(os.getenv("BOT_POLL_SECONDS", "60"))
     log_level: str = os.getenv("BOT_LOG_LEVEL", "INFO")
 
+    # ---- Dashboard: the two windows the "Open trading windows" link pops open -
+    window1_url: str = os.getenv("BOT_WINDOW_1_URL", "https://www.tradingview.com/chart/")
+    window2_url: str = os.getenv("BOT_WINDOW_2_URL", "https://www.coinbase.com/advanced-trade/spot/BTC-USD")
+    window1_title: str = os.getenv("BOT_WINDOW_1_TITLE", "Chart")
+    window2_title: str = os.getenv("BOT_WINDOW_2_TITLE", "Broker")
+
     def symbol(self) -> str:
         return INSTRUMENT_SYMBOLS[self.instrument]
 

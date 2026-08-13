@@ -90,6 +90,21 @@ python -m bot.main once --broker alpaca --instrument spy_options --size 1
 
 `--live` sends **real** orders; the default is **dry-run** (simulated, logged).
 
+### Dashboard (the "trader app" page on your server)
+
+Running in `webhook` mode also serves a dashboard at `/` (e.g.
+`http://YOUR_DROPLET_IP/`). Its **"Open trading windows"** button opens **two
+separate browser windows** side by side — set what they point to in `.env`:
+
+```ini
+BOT_WINDOW_1_URL=https://www.tradingview.com/chart/
+BOT_WINDOW_2_URL=https://www.coinbase.com/advanced-trade/spot/BTC-USD
+BOT_WINDOW_1_TITLE=Chart
+BOT_WINDOW_2_TITLE=Broker
+```
+
+Allow pop-ups for the site so both windows can open.
+
 ### Notifications
 
 The bot logs `4H TREND: UPTREND` / `DOWNTREND` on every confirmed flip, and can
