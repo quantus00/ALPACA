@@ -94,7 +94,8 @@ python -m bot.main once --broker alpaca --instrument spy_options --size 1
 
 Running in `webhook` mode also serves a dashboard at `/` (e.g.
 `http://YOUR_DROPLET_IP/`). Its **"Open trading windows"** button opens **two
-separate browser windows** side by side — set what they point to in `.env`:
+separate browser windows** side by side, **one after the other** (staggered, not
+at the same instant) — set what they point to in `.env`:
 
 ```ini
 BOT_WINDOW_1_URL=https://www.tradingview.com/chart/

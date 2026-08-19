@@ -20,7 +20,8 @@ log = logging.getLogger(__name__)
 
 
 # The dashboard page served at "/". The button opens both URLs as two separate
-# windows in a single user click (distinct window names => two windows, not one).
+# windows from a single user click (distinct window names => two windows, not
+# one), staggered so they open one after the other rather than at the same time.
 DASHBOARD_HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -51,15 +52,21 @@ DASHBOARD_HTML = """<!doctype html>
       <a href="{w2}" target="win2">{t2} only</a>
     </div>
     <div class="cfg">{desc}</div>
-    <div class="note">Allow pop-ups for this site so both windows can open.</div>
+    <div class="note">Opens the two windows one after the other. Allow pop-ups for this site so both can open.</div>
   </div>
 <script>
+// Delay (ms) between opening the first and the second window, so they do NOT
+// open at the same instant.
+var OPEN_STAGGER_MS = 700;
 function openBoth() {{
   var sw = screen.availWidth || 1280, sh = screen.availHeight || 800;
   var w = Math.floor(sw / 2) - 20, h = sh - 80;
   // Two distinct window names => two separate OS windows, placed side by side.
+  // Open the first now, then the second after a short delay (not simultaneously).
   window.open("{w1}", "win1", "width="+w+",height="+h+",left=0,top=0,noopener");
-  window.open("{w2}", "win2", "width="+w+",height="+h+",left="+(w+20)+",top=0,noopener");
+  setTimeout(function() {{
+    window.open("{w2}", "win2", "width="+w+",height="+h+",left="+(w+20)+",top=0,noopener");
+  }}, OPEN_STAGGER_MS);
 }}
 </script>
 </body></html>"""
