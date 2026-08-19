@@ -52,9 +52,26 @@ Plain `UPTREND` / `DOWNTREND` alert bodies are treated as notifications only.
 ### Install
 
 ```bash
-pip install -r requirements.txt      # plus the SDK for your broker (see file)
+pip install -r requirements.txt      # core deps only — runs out of the box
 cp .env.example .env                  # then fill in your toggles + keys
 ```
+
+The core install (`requests` + `flask`) is all you need to run the bot. Broker
+SDKs are **optional** and only required to send **live** orders on that broker —
+uncomment the matching line in `requirements.txt` when you're ready to go live.
+
+### Quick start (no API keys)
+
+BTC/USD structure comes from Coinbase's **public** market-data API, so you can
+run the bot immediately after installing, with no keys and in dry-run:
+
+```bash
+pip install -r requirements.txt
+python -m bot.main once --broker coinbase --instrument btc_usd_spot --size 0.01
+```
+
+This prints the current 4H trend and per-timeframe alignment without placing any
+order.
 
 ### Toggles
 

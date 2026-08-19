@@ -1,9 +1,11 @@
-# Core
-requests>=2.31
-flask>=3.0
+# Core — everything you need to run the bot (poll / once / webhook) out of the box.
+requests>=2.31   # market data + REST order routing
+flask>=3.0       # webhook mode + dashboard
 
-# Broker SDKs (install only what you need for your chosen broker)
-coinbase-advanced-py>=1.2   # Coinbase: BTC/USD spot + nano perp
-# alpaca-py>=0.20           # optional; REST is used directly for Alpaca options
-# webull>=0.6               # Webull: SPY options (community, unofficial)
+# Broker SDKs — install only the one for the broker you actually trade LIVE with.
+# They are imported lazily, so dry-run and market-data (the default) work without
+# any of these. Uncomment the line for your broker before sending real orders:
+# coinbase-advanced-py>=1.2   # Coinbase: BTC/USD spot + nano perp (live orders)
+# alpaca-py>=0.20             # optional; REST is used directly for Alpaca options
+# webull>=0.6                 # Webull: SPY options (community, unofficial)
 # tradovate uses plain REST (requests) — no SDK required
