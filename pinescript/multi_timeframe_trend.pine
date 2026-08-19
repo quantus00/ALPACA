@@ -1,0 +1,135 @@
+//@version=5
+// =============================================================================
+// Multi-Timeframe Trend Structure Bot
+// -----------------------------------------------------------------------------
+// 1. Identifies the 4H trend from market structure (HH/HL = UPTREND, LH/LL =
+//    DOWNTREND) and prints the state on the chart.
+// 2. Detects a trend BREAK: an uptrend is broken only when BOTH a Lower High
+//    and a Lower Low print (and vice-versa for a downtrend). That confirmed
+//    break flips the 4H trend.
+// 3. Fires an entry only when the 5m, 15m, 30m and 1H timeframes have all
+//    aligned with the NEW 4H trend direction.
+// 4. Emits JSON alerts that the companion Python bot consumes via webhook to
+//    route orders to Coinbase / Alpaca / Tradovate / Webull.
+// =============================================================================
+indicator("Multi-Timeframe Trend Bot", overlay=true, max_labels_count=500)
+
+// ----------------------------------------------------------------------------- Inputs
+grpStruct = "Market Structure"
+pivotLen  = input.int(5, "Pivot lookback (bars each side)", minval=1, group=grpStruct,
+     tooltip="How many bars left/right define a swing pivot. Larger = smoother structure.")
+trendTF   = input.timeframe("240", "Trend timeframe", group=grpStruct,
+     tooltip="The higher timeframe that defines the master trend (default 4H).")
+
+grpAlign  = "Entry Alignment Timeframes"
+tf1 = input.timeframe("5",  "Alignment TF 1", group=grpAlign)
+tf2 = input.timeframe("15", "Alignment TF 2", group=grpAlign)
+tf3 = input.timeframe("30", "Alignment TF 3", group=grpAlign)
+tf4 = input.timeframe("60", "Alignment TF 4", group=grpAlign)
+
+grpAlert  = "Alerts / Webhook"
+symbolTag = input.string("BTCUSD", "Symbol tag (sent in alert payload)", group=grpAlert)
+
+// ----------------------------------------------------------------------------- Structure engine
+// Returns trend state on a given timeframe from swing structure.
+//  1 = UPTREND (HH & HL), -1 = DOWNTREND (LH & LL), previous state held otherwise.
+// Also returns whether a confirmed reversal (both legs broke) just happened.
+f_trend_state() =>
+    ph = ta.pivothigh(pivotLen, pivotLen)
+    pl = ta.pivotlow(pivotLen, pivotLen)
+
+    var float lastPH  = na
+    var float prevPH  = na
+    var float lastPL  = na
+    var float prevPL  = na
+    var int   state   = 0     // 1 up, -1 down, 0 undetermined
+    var bool  flipped = false
+    flipped := false
+
+    if not na(ph)
+        prevPH := lastPH
+        lastPH := ph
+    if not na(pl)
+        prevPL := lastPL
+        lastPL := pl
+
+    higherHigh = not na(lastPH) and not na(prevPH) and lastPH > prevPH
+    lowerHigh  = not na(lastPH) and not na(prevPH) and lastPH < prevPH
+    higherLow  = not na(lastPL) and not na(prevPL) and lastPL > prevPL
+    lowerLow   = not na(lastPL) and not na(prevPL) and lastPL < prevPL
+
+    // Confirmed UPTREND: higher high AND higher low.
+    if higherHigh and higherLow and state != 1
+        state   := 1
+        flipped := true
+    // Confirmed DOWNTREND: lower high AND lower low (both legs break).
+    if lowerHigh and lowerLow and state != -1
+        state   := -1
+        flipped := true
+
+    [state, flipped]
+
+// Pull the master trend from the 4H timeframe.
+[htfState, htfFlipped] = request.security(syminfo.tickerid, trendTF, f_trend_state(),
+     lookahead=barmerge.lookahead_off)
+
+// Pull the trend state from each alignment timeframe.
+f_state_only() =>
+    [s, _f] = f_trend_state()
+    s
+s1 = request.security(syminfo.tickerid, tf1, f_state_only(), lookahead=barmerge.lookahead_off)
+s2 = request.security(syminfo.tickerid, tf2, f_state_only(), lookahead=barmerge.lookahead_off)
+s3 = request.security(syminfo.tickerid, tf3, f_state_only(), lookahead=barmerge.lookahead_off)
+s4 = request.security(syminfo.tickerid, tf4, f_state_only(), lookahead=barmerge.lookahead_off)
+
+// ----------------------------------------------------------------------------- Alignment
+allAlignedUp   = htfState == 1  and s1 == 1  and s2 == 1  and s3 == 1  and s4 == 1
+allAlignedDown = htfState == -1 and s1 == -1 and s2 == -1 and s3 == -1 and s4 == -1
+
+// Only trigger an entry the first time everything lines up after a 4H flip.
+var int lastEntryDir = 0
+longEntry  = allAlignedUp   and lastEntryDir != 1
+shortEntry = allAlignedDown and lastEntryDir != -1
+if longEntry
+    lastEntryDir := 1
+if shortEntry
+    lastEntryDir := -1
+// Reset when alignment is lost so the next re-alignment can fire again.
+if not allAlignedUp and not allAlignedDown
+    lastEntryDir := 0
+
+// ----------------------------------------------------------------------------- Visuals
+trendTxt = htfState == 1 ? "UPTREND" : htfState == -1 ? "DOWNTREND" : "NEUTRAL"
+trendCol = htfState == 1 ? color.new(color.green, 0) : htfState == -1 ? color.new(color.red, 0) : color.gray
+
+var table info = table.new(position.top_right, 1, 2, border_width=1)
+if barstate.islast
+    table.cell(info, 0, 0, "4H TREND", text_color=color.white, bgcolor=color.new(color.black, 20))
+    table.cell(info, 0, 1, trendTxt, text_color=color.white, bgcolor=trendCol)
+
+plotshape(htfFlipped and htfState == 1,  title="4H flip UP",   style=shape.triangleup,   location=location.belowbar, color=color.green, size=size.small)
+plotshape(htfFlipped and htfState == -1, title="4H flip DOWN", style=shape.triangledown, location=location.abovebar, color=color.red,   size=size.small)
+plotshape(longEntry,  title="LONG entry",  style=shape.labelup,   location=location.belowbar, color=color.new(color.green, 0), text="ENTRY", textcolor=color.white, size=size.tiny)
+plotshape(shortEntry, title="SHORT entry", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0),   text="ENTRY", textcolor=color.white, size=size.tiny)
+bgcolor(htfState == 1 ? color.new(color.green, 92) : htfState == -1 ? color.new(color.red, 92) : na)
+
+// ----------------------------------------------------------------------------- Alerts (JSON for the Python webhook)
+f_payload(side) =>
+    '{"symbol":"' + symbolTag + '","action":"' + side +
+     '","trend":"' + trendTxt +
+     '","price":' + str.tostring(close) +
+     ',"time":' + str.tostring(time) + '}'
+
+if htfFlipped and htfState == 1
+    alert("UPTREND", alert.freq_once_per_bar_close)
+if htfFlipped and htfState == -1
+    alert("DOWNTREND", alert.freq_once_per_bar_close)
+if longEntry
+    alert(f_payload("buy"),  alert.freq_once_per_bar_close)
+if shortEntry
+    alert(f_payload("sell"), alert.freq_once_per_bar_close)
+
+alertcondition(htfFlipped and htfState == 1,  "4H UPTREND",   "4H trend flipped to UPTREND")
+alertcondition(htfFlipped and htfState == -1, "4H DOWNTREND", "4H trend flipped to DOWNTREND")
+alertcondition(longEntry,  "Long Entry",  "All timeframes aligned UP")
+alertcondition(shortEntry, "Short Entry", "All timeframes aligned DOWN")
