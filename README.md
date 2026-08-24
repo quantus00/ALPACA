@@ -140,8 +140,30 @@ python tests/test_trend.py      # or: pytest tests/
 
 ---
 
+### Webull (official OpenAPI)
+
+The Webull integration uses Webull's **official OpenAPI SDK** and supports both
+**paper** (fake money) and **live** (real money) accounts. Select with
+`WEBULL_MODE`:
+
+```bash
+pip install webull-python-sdk-core webull-python-sdk-trade
+# keys in .env: WEBULL_PAPER_APP_KEY/SECRET (paper) and/or WEBULL_APP_KEY/SECRET (live)
+python -m bot.brokers.webull          # read-only: lists accounts -> copy WEBULL_ACCOUNT_ID
+```
+
+- `WEBULL_MODE=paper` → uses `WEBULL_PAPER_APP_KEY/SECRET`.
+- `WEBULL_MODE=live` → uses `WEBULL_APP_KEY/SECRET`. A live send is **also**
+  refused unless `WEBULL_CONFIRM_LIVE=yes`, on top of `BOT_DRY_RUN=false`.
+
+Webull's OpenAPI is well-supported for US **stocks/options**; **futures** and
+**fractional** support depend on your account/region/SDK version.
+
+---
+
 ## ⚠️ Disclaimer
 
 For education and research. Trading involves substantial risk of loss. Keep
 `BOT_DRY_RUN=true` until you have validated behaviour on paper/demo accounts.
-The Webull integration relies on an unofficial community API and may break.
+Never commit API keys — keep them in `.env` (git-ignored) or environment
+variables, and rotate any key that has been exposed.

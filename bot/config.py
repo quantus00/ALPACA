@@ -71,6 +71,10 @@ class Config:
     option_dte: int = int(os.getenv("BOT_OPTION_DTE", "0"))          # target days-to-expiry
     option_delta_target: float = float(os.getenv("BOT_OPTION_DELTA", "0.40"))
 
+    # ---- Webull (official OpenAPI) ------------------------------------------
+    # paper -> WEBULL_PAPER_APP_KEY/SECRET (fake $); live -> WEBULL_APP_KEY/SECRET (REAL $)
+    webull_mode: str = os.getenv("WEBULL_MODE", "paper")
+
     # ---- Runtime knobs -------------------------------------------------------
     dry_run: bool = _env_bool("BOT_DRY_RUN", True)
     webhook_host: str = os.getenv("BOT_WEBHOOK_HOST", "0.0.0.0")
@@ -105,4 +109,5 @@ class Config:
             f"symbol={self.symbol()} size={self.contract_size} "
             f"trend_tf={self.trend_timeframe} align={','.join(self.alignment_timeframes)} "
             f"dry_run={self.dry_run}"
+            + (f" webull_mode={self.webull_mode}" if self.broker.value == "webull" else "")
         )
