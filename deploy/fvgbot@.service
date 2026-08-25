@@ -1,0 +1,26 @@
+# systemd template unit for the Coinbase 1-min FVG bot.
+# Enable for a specific user (the %i instance name), e.g.:
+#   sudo systemctl enable --now fvgbot@youruser
+# Runs 24/7, restarts on crash and on reboot. Logs -> journalctl -u fvgbot@youruser -f
+[Unit]
+Description=Coinbase 1-min FVG bot (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/opt/bot
+EnvironmentFile=/etc/bot.env
+# Start DRY-RUN safe: BOT_DRY_RUN in /etc/bot.env controls real vs simulated.
+# Add --live here ONLY after paper-testing, or set BOT_DRY_RUN=false in /etc/bot.env.
+ExecStart=/opt/bot/.venv/bin/python -m bot.fvg_bot --instrument btc_usd_spot --size 0.001
+Restart=always
+RestartSec=5
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

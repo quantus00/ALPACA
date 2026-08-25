@@ -1,0 +1,12 @@
+# Core
+requests>=2.31
+flask>=3.0
+
+# Broker SDKs (install only what you need for your chosen broker)
+coinbase-advanced-py>=1.2   # Coinbase: BTC/USD spot + nano perp
+# alpaca-py>=0.20           # optional; REST is used directly for Alpaca options
+# Webull: official OpenAPI SDK (paper + live). Install both for trading:
+# webull-python-sdk-core>=0.1
+# webull-python-sdk-trade>=0.1
+# webull-python-sdk-mdata>=0.1  # optional; historical/live bars
+# tradovate uses plain REST (requests) — no SDK required
