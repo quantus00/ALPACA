@@ -140,6 +140,23 @@ python tests/test_trend.py      # or: pytest tests/
 
 ---
 
+### Coinbase 1-min FVG bot
+
+A self-contained Fair-Value-Gap bot for Coinbase lives in `bot/fvg_bot.py`: it
+pulls 1-minute candles, detects 3-bar FVGs, and trades in the gap's direction
+(long/flat on spot, long+short on the nano perp).
+
+```bash
+python -m bot.fvg_bot --selftest              # synthetic logic check (no net/keys)
+python -m bot.fvg_bot --replay btc_1m.csv     # backtest-style replay, dry-run
+python -m bot.fvg_bot                          # live 1m data, DRY-RUN (no orders)
+python -m bot.fvg_bot --live --size 0.001      # REAL Coinbase orders
+```
+
+Knobs (`.env` / `deploy/bot.env.example`): `FVG_RR`, `FVG_BUFFER`, `FVG_MAX_HOLD`,
+`FVG_MIN_GAP_FRAC`, `BOT_POLL_SECONDS`. To run it 24/7 on a DigitalOcean droplet
+with auto-deploy from GitHub, see **`deploy/DEPLOY.md`**.
+
 ### Webull (official OpenAPI)
 
 The Webull integration uses Webull's **official OpenAPI SDK** and supports both

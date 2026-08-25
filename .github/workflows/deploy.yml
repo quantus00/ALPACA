@@ -1,0 +1,28 @@
+name: Deploy to DigitalOcean
+
+# Push to main -> SSH into the droplet, pull the new code, reinstall deps,
+# and restart the systemd bot service. The bot RUNS on the droplet 24/7;
+# GitHub only stores the code and triggers the redeploy.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}   # allow manual "Run workflow" from the Actions tab
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DO_HOST }}
+          username: ${{ secrets.DO_USER }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/bot
+            git pull --ff-only
+            . .venv/bin/activate
+            pip install -q -r requirements.txt
+            sudo systemctl restart "fvgbot@${{ secrets.DO_USER }}"
+            sudo systemctl --no-pager status "fvgbot@${{ secrets.DO_USER }}" | head -n 5

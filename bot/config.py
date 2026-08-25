@@ -75,6 +75,13 @@ class Config:
     # paper -> WEBULL_PAPER_APP_KEY/SECRET (fake $); live -> WEBULL_APP_KEY/SECRET (REAL $)
     webull_mode: str = os.getenv("WEBULL_MODE", "paper")
 
+    # ---- FVG bot knobs (1-min fair-value-gap strategy) ----------------------
+    fvg_timeframe: str = os.getenv("FVG_TF", "1m")
+    fvg_rr: float = float(os.getenv("FVG_RR", "2.0"))            # reward:risk multiple
+    fvg_buffer: float = float(os.getenv("FVG_BUFFER", "0.0"))   # stop buffer, price units
+    fvg_max_hold: int = int(os.getenv("FVG_MAX_HOLD", "0"))     # 0 = no time stop
+    fvg_min_gap_frac: float = float(os.getenv("FVG_MIN_GAP_FRAC", "0.0"))  # min gap / price
+
     # ---- Runtime knobs -------------------------------------------------------
     dry_run: bool = _env_bool("BOT_DRY_RUN", True)
     webhook_host: str = os.getenv("BOT_WEBHOOK_HOST", "0.0.0.0")
