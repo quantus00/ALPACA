@@ -132,7 +132,52 @@ timeframes agree; the trigger re-arms once alignment is lost.
 
 ---
 
-## 4. Tests
+## 4. Webull crypto paper trading (standalone script)
+
+Want to just place a **paper** crypto trade on Webull — pick the coin, pick the
+amount — without running the whole bot? Use `webull_crypto_paper_trade.py`. It
+runs straight from your terminal or the VS Code **Run** button and only ever
+touches your Webull **paper** account.
+
+```bash
+pip install webull                    # community, unofficial Webull client
+cp .env.example .env                  # fill in WEBULL_EMAIL / PASSWORD / TRADE_PIN
+
+# Preview without logging in or sending anything:
+python webull_crypto_paper_trade.py --crypto BTC --amount 100 --dry-run
+
+# Place a real paper order — $100 of Bitcoin:
+python webull_crypto_paper_trade.py --crypto BTC --amount 100
+
+# By quantity instead of dollars, on the sell side:
+python webull_crypto_paper_trade.py --crypto ETH --qty 0.25 --side sell
+
+# No flags → it asks you for coin, side and amount interactively:
+python webull_crypto_paper_trade.py
+```
+
+| Flag | Meaning |
+|------|---------|
+| `--crypto` / `--symbol` | Coin to trade: `BTC`, `ETH`, `DOGE`, `BTC-USD`, `BTCUSD`, … |
+| `--amount` | Dollar amount (e.g. `100` = $100 of the coin) |
+| `--qty` | Quantity of the coin instead of a dollar amount |
+| `--side` | `buy` (default) or `sell` |
+| `--limit` | Limit price; omit for a market order |
+| `--dry-run` | Validate + preview only — never logs in or sends |
+| `--yes` / `-y` | Skip the confirmation prompt |
+
+**VS Code:** open the folder, press **F5** (or the green Run arrow) and pick
+*"Webull paper trade (interactive)"* or the BTC dry-run config in
+`.vscode/launch.json`.
+
+Credentials come from the environment or `.env` (`WEBULL_EMAIL`,
+`WEBULL_PASSWORD`, `WEBULL_TRADE_PIN`, optional `WEBULL_DEVICE_ID`). This uses
+the unofficial community `webull` package and its `paper_webull` client, so it
+can break if Webull changes their endpoints — keep it on paper.
+
+---
+
+## 5. Tests
 
 ```bash
 python tests/test_trend.py      # or: pytest tests/
