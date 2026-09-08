@@ -1,31 +1,41 @@
 #!/usr/bin/env python3
-"""SPY 0DTE call+put bot (Alpaca, paper by default).
+"""SPY 0DTE call+put bot with an interactive exit console (Alpaca paper).
 
-Strategy
-    • At 10:34 ET, buy 1 SPY 0DTE CALL that is `--itm` strikes in-the-money
-      (strike = round(spot) - itm) and 1 SPY 0DTE PUT that is `--itm` strikes
-      in-the-money (strike = round(spot) + itm).
-    • While open, watch the COMBINED profit of the two legs. When it reaches
-      `--target` (default +30%), close both.
-    • Hard stop: at 11:10 ET, close anything still open.
+Entry
+    At 10:34 ET (‑‑entry), buy 1 SPY 0DTE CALL `--itm` strikes in-the-money
+    (strike = round(spot) - itm) and 1 SPY 0DTE PUT `--itm` strikes ITM
+    (strike = round(spot) + itm).
 
-Broker: Alpaca. Uses the paper endpoint by default — fake money. It only sends
-live orders if you point ALPACA_BASE_URL at the live API AND pass --live.
+Managing the trade — YOU choose how to close
+    Once both legs are open a live console shows CALL / PUT / COMBINED P/L and
+    lets you act each cycle:
+        cb          close BOTH legs and quit
+        cc / cp     close just the Call / just the Put
+        bm          buy more (add contracts to a leg)
+        tp <pct>    set/replace the COMBINED take-profit  (e.g. tp 0.30)
+        ctp <pct>   set the CALL-leg take-profit          (e.g. ctp 0.5)
+        ptp <pct>   set the PUT-leg take-profit
+        sl <pct>    set a COMBINED stop-loss              (e.g. sl -0.5)
+        off <t|c|p|s>   disable a rule (target / call / put / stop)
+        st          reprint status   ·   q   close all and quit
+    Any armed rule auto-fires even while you're away. Hard time-stop at 11:10 ET
+    (--exit) always closes everything.
+
+Broker: Alpaca, paper by default (fake money). Live orders require a live
+ALPACA_BASE_URL *and* --live.
 
 Setup
     pip install requests
-    # in .env (or the environment):
-    ALPACA_API_KEY=...        ALPACA_API_SECRET=...
-    ALPACA_BASE_URL=https://paper-api.alpaca.markets   # paper (default)
+    # .env:  ALPACA_API_KEY=...  ALPACA_API_SECRET=...
+    #        ALPACA_BASE_URL=https://paper-api.alpaca.markets
 
 Usage
-    python spy_0dte_bot.py plan     # show what it would trade right now, no orders
-    python spy_0dte_bot.py run      # run the scheduled strategy (paper)
-    python spy_0dte_bot.py run --dry-run     # schedule + select, but never order
-    python spy_0dte_bot.py run --itm 3 --target 0.30 --entry 10:34 --exit 11:10
+    python spy_0dte_bot.py plan                 # preview strikes, no orders
+    python spy_0dte_bot.py run                  # entry + interactive console
+    python spy_0dte_bot.py run --target 0.30 --stop -0.5 --exit 11:10
+    python spy_0dte_bot.py run --auto           # no prompts: rules + time only
 
-0DTE options are extremely risky and can lose 100% fast. Paper-trade first.
-Not financial advice.
+0DTE options are extremely risky. Paper-trade first. Not financial advice.
 """
 from __future__ import annotations
 
@@ -33,7 +43,8 @@ import argparse
 import os
 import sys
 import time
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, date
 from pathlib import Path
 
@@ -73,12 +84,16 @@ def log(msg: str) -> None:
 class Config:
     entry: str = "10:34"
     exit: str = "11:10"
-    target: float = 0.30
+    target: float | None = 0.30          # combined take-profit
+    call_target: float | None = None     # call-leg take-profit
+    put_target: float | None = None      # put-leg take-profit
+    stop: float | None = None            # combined stop-loss (negative)
     itm: int = 3
     qty: int = 1
     poll: int = 15
     dry_run: bool = False
     live: bool = False
+    interactive: bool = True
 
 
 class Alpaca:
@@ -104,7 +119,6 @@ class Alpaca:
         return float(j["trade"]["p"])
 
     def find_contract(self, opt_type: str, strike: float, expiration: str) -> dict:
-        """Nearest listed 0DTE contract of opt_type to `strike`."""
         j = self._get(f"{self.base}/v2/options/contracts",
                       underlying_symbols="SPY", expiration_date=expiration,
                       type=opt_type, strike_price_gte=strike - 5,
@@ -121,8 +135,8 @@ class Alpaca:
         r.raise_for_status()
         return r.json()
 
-    def positions(self) -> list[dict]:
-        return self._get(f"{self.base}/v2/positions")
+    def positions_by_symbol(self) -> dict[str, dict]:
+        return {p["symbol"]: p for p in self._get(f"{self.base}/v2/positions")}
 
     def close_position(self, symbol: str) -> None:
         r = requests.delete(f"{self.base}/v2/positions/{symbol}", headers=self.h, timeout=20)
@@ -137,24 +151,39 @@ def select_strikes(spot: float, itm: int) -> tuple[int, int]:
     return atm - itm, atm + itm
 
 
-def combined_pl(positions: list[dict], symbols: set[str]) -> tuple[float, float]:
-    """Return (combined_pl_pct, combined_unrealized_pl_$) for our two legs."""
-    cost = pl = 0.0
-    for p in positions:
-        if p["symbol"] in symbols:
-            cost += abs(float(p["cost_basis"]))
-            pl += float(p["unrealized_pl"])
-    pct = pl / cost if cost else 0.0
-    return pct, pl
-
-
 def resolve_legs(api: Alpaca, cfg: Config):
     spot = api.spy_price()
     call_k, put_k = select_strikes(spot, cfg.itm)
     today = date.today().isoformat()
-    call = api.find_contract("call", call_k, today)
-    put = api.find_contract("put", put_k, today)
-    return spot, call, put
+    return spot, api.find_contract("call", call_k, today), api.find_contract("put", put_k, today)
+
+
+# ---- interactive input (POSIX: timed; else blocking) ---------------------
+def read_command(timeout: float, interactive: bool) -> str | None:
+    if not interactive:
+        time.sleep(timeout)
+        return None
+    try:
+        import select
+        print("cmd> ", end="", flush=True)
+        ready, _, _ = select.select([sys.stdin], [], [], timeout)
+        if ready:
+            return sys.stdin.readline().strip()
+        print()  # newline after the idle prompt
+        return None
+    except Exception:  # Windows / non-tty: block on input, rules checked each loop
+        try:
+            return input("cmd> ").strip()
+        except EOFError:
+            time.sleep(timeout)
+            return None
+
+
+def _pct(tok: str) -> float | None:
+    try:
+        return float(tok)
+    except (TypeError, ValueError):
+        return None
 
 
 # --------------------------------------------------------------------------
@@ -163,14 +192,13 @@ def cmd_plan(api: Alpaca, cfg: Config) -> int:
     log(f"SPY spot ≈ {spot:.2f}  →  ATM {round(spot)}")
     log(f"CALL {cfg.itm} ITM: {call['symbol']}  strike {call['strike_price']}")
     log(f"PUT  {cfg.itm} ITM: {put['symbol']}  strike {put['strike_price']}")
-    log(f"Would buy {cfg.qty}x each at market; target +{cfg.target:.0%}; "
-        f"hard exit {cfg.exit} ET. (plan only — no orders)")
+    log("plan only — no orders.")
     return 0
 
 
 def cmd_run(api: Alpaca, cfg: Config) -> int:
     if not api.is_paper and not cfg.live:
-        raise SystemExit("ALPACA_BASE_URL is a LIVE endpoint. Re-run with --live to allow real orders.")
+        raise SystemExit("ALPACA_BASE_URL is LIVE. Re-run with --live to allow real orders.")
     if not api.is_paper:
         log("⚠️  LIVE trading endpoint — real money.")
 
@@ -179,11 +207,9 @@ def cmd_run(api: Alpaca, cfg: Config) -> int:
     xh, xm = map(int, cfg.exit.split(":"))
     entry_dt = now.replace(hour=eh, minute=em, second=0, microsecond=0)
     exit_dt = now.replace(hour=xh, minute=xm, second=0, microsecond=0)
-
     if now >= exit_dt:
-        raise SystemExit(f"It's past the {cfg.exit} ET hard-exit for today. Nothing to do.")
+        raise SystemExit(f"Past the {cfg.exit} ET hard-exit for today. Nothing to do.")
 
-    # Wait for entry (or enter now if we started mid-window).
     if now < entry_dt:
         wait = (entry_dt - now).total_seconds()
         log(f"Waiting {int(wait)}s until entry at {cfg.entry} ET…")
@@ -192,61 +218,179 @@ def cmd_run(api: Alpaca, cfg: Config) -> int:
         log(f"Started after {cfg.entry} ET — entering now.")
 
     spot, call, put = resolve_legs(api, cfg)
-    symbols = {call["symbol"], put["symbol"]}
-    log(f"SPY {spot:.2f} → CALL {call['symbol']} / PUT {put['symbol']}")
+    contracts = {"call": call["symbol"], "put": put["symbol"]}
+    log(f"SPY {spot:.2f} → CALL {contracts['call']} / PUT {contracts['put']}")
 
     if cfg.dry_run:
-        log("[DRY RUN] Would buy both legs now; skipping orders and monitoring.")
+        log("[DRY RUN] would buy both legs; skipping orders + console.")
         return 0
 
     for c in (call, put):
         o = api.buy_to_open(c["symbol"], cfg.qty)
         log(f"BUY {cfg.qty}x {c['symbol']} → order {o.get('id', '?')} ({o.get('status')})")
 
-    # Monitor
-    log(f"Monitoring: close both at +{cfg.target:.0%} combined, or at {cfg.exit} ET.")
-    while True:
-        now = datetime.now(ET)
-        if now >= exit_dt:
-            log(f"{cfg.exit} ET hard stop — closing both.")
-            break
-        try:
-            pct, pl = combined_pl(api.positions(), symbols)
-            log(f"combined P/L {pct:+.1%}  (${pl:+.2f})")
-            if pct >= cfg.target:
-                log(f"🎯 target hit (+{cfg.target:.0%}) — closing both.")
-                break
-        except requests.HTTPError as e:
-            log(f"poll error: {e}")
-        time.sleep(cfg.poll)
-
-    for sym in symbols:
-        try:
-            api.close_position(sym)
-            log(f"CLOSE {sym} submitted.")
-        except requests.HTTPError as e:
-            log(f"close {sym} failed (already flat?): {e}")
+    manage(api, cfg, contracts, exit_dt)
     log("Done.")
     return 0
+
+
+def manage(api: Alpaca, cfg: Config, contracts: dict[str, str], exit_dt: datetime) -> None:
+    """Interactive management loop: live P/L + armed rules + your commands."""
+    rules = {"target": cfg.target, "call": cfg.call_target,
+             "put": cfg.put_target, "stop": cfg.stop}
+    open_sides = {"call", "put"}
+
+    def show_rules():
+        parts = []
+        for k, lbl in (("target", "combined TP"), ("call", "call TP"),
+                       ("put", "put TP"), ("stop", "stop")):
+            parts.append(f"{lbl}={rules[k]:+.0%}" if rules[k] is not None else f"{lbl}=off")
+        log("rules: " + "  ".join(parts))
+
+    def close_side(side: str):
+        sym = contracts[side]
+        try:
+            api.close_position(sym)
+            log(f"CLOSE {side.upper()} {sym} submitted.")
+        except requests.HTTPError as e:
+            log(f"close {side} failed (already flat?): {e}")
+        open_sides.discard(side)
+
+    log(f"Managing. Combined target {('+%.0f%%' % (cfg.target*100)) if cfg.target is not None else 'off'}, "
+        f"hard exit {cfg.exit} ET.")
+    show_rules()
+
+    while open_sides:
+        now = datetime.now(ET)
+        try:
+            pos = api.positions_by_symbol()
+        except requests.HTTPError as e:
+            log(f"poll error: {e}")
+            time.sleep(cfg.poll)
+            continue
+
+        stat: dict[str, tuple[float, float]] = {}   # side -> (plpc, pl$)
+        cost_all = pl_all = 0.0
+        for side in list(open_sides):
+            p = pos.get(contracts[side])
+            if not p or abs(float(p.get("qty", 0))) < 1e-9:
+                log(f"{side.upper()} leg is flat.")
+                open_sides.discard(side)
+                continue
+            plpc = float(p["unrealized_plpc"])
+            pl = float(p["unrealized_pl"])
+            stat[side] = (plpc, pl)
+            cost_all += abs(float(p["cost_basis"]))
+            pl_all += pl
+        if not open_sides:
+            break
+        combined = pl_all / cost_all if cost_all else 0.0
+        legs_txt = "  ".join(f"{s.upper()} {stat[s][0]:+.1%} (${stat[s][1]:+.2f})" for s in stat)
+        log(f"{legs_txt}  |  COMBINED {combined:+.1%} (${pl_all:+.2f})")
+
+        # ---- armed auto-rules ------------------------------------------
+        fire = None
+        if now >= exit_dt:
+            fire = ("both", f"time {cfg.exit}")
+        elif rules["stop"] is not None and combined <= rules["stop"]:
+            fire = ("both", f"combined stop {rules['stop']:+.0%}")
+        elif rules["target"] is not None and combined >= rules["target"]:
+            fire = ("both", f"combined +{rules['target']:.0%}")
+        elif rules["call"] is not None and "call" in stat and stat["call"][0] >= rules["call"]:
+            fire = ("call", f"call +{rules['call']:.0%}")
+        elif rules["put"] is not None and "put" in stat and stat["put"][0] >= rules["put"]:
+            fire = ("put", f"put +{rules['put']:.0%}")
+        if fire:
+            log(f"⚡ auto: {fire[1]} → close {fire[0]}")
+            if fire[0] == "both":
+                for s in list(open_sides):
+                    close_side(s)
+                break
+            close_side(fire[0])
+            continue
+
+        # ---- your command ----------------------------------------------
+        cmd = read_command(cfg.poll, cfg.interactive)
+        if not cmd:
+            continue
+        parts = cmd.split()
+        op = parts[0].lower()
+        arg = _pct(parts[1]) if len(parts) > 1 else None
+
+        if op in ("cb", "q", "close"):
+            for s in list(open_sides):
+                close_side(s)
+            break
+        elif op == "cc":
+            close_side("call")
+        elif op == "cp":
+            close_side("put")
+        elif op == "bm":
+            _buy_more(api, cfg, contracts, open_sides)
+        elif op == "tp" and arg is not None:
+            rules["target"] = arg; show_rules()
+        elif op == "ctp" and arg is not None:
+            rules["call"] = arg; show_rules()
+        elif op == "ptp" and arg is not None:
+            rules["put"] = arg; show_rules()
+        elif op == "sl" and arg is not None:
+            rules["stop"] = arg; show_rules()
+        elif op == "off" and len(parts) > 1:
+            key = {"t": "target", "c": "call", "p": "put", "s": "stop"}.get(parts[1].lower())
+            if key:
+                rules[key] = None; show_rules()
+        elif op == "st":
+            show_rules()
+        else:
+            log("commands: cb cc cp bm | tp<x> ctp<x> ptp<x> sl<x> off<t|c|p|s> st q")
+
+
+def _buy_more(api: Alpaca, cfg: Config, contracts: dict[str, str], open_sides: set[str]) -> None:
+    try:
+        side = input("  buy more which leg? [call/put/both]: ").strip().lower()
+        n = input(f"  how many contracts? [{cfg.qty}]: ").strip()
+        qty = int(n) if n else cfg.qty
+    except EOFError:
+        return
+    sides = ["call", "put"] if side in ("both", "b") else [side] if side in ("call", "put") else []
+    if not sides:
+        log("  cancelled.")
+        return
+    for s in sides:
+        try:
+            o = api.buy_to_open(contracts[s], qty)
+            open_sides.add(s)
+            log(f"  BUY {qty}x {contracts[s]} → order {o.get('id', '?')} ({o.get('status')})")
+        except requests.HTTPError as e:
+            log(f"  buy {s} failed: {e}")
 
 
 # --------------------------------------------------------------------------
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
-    ap = argparse.ArgumentParser(description="SPY 0DTE call+put bot (Alpaca).")
-    ap.add_argument("cmd", choices=["run", "plan"], help="run the strategy, or preview selection")
+    ap = argparse.ArgumentParser(description="SPY 0DTE call+put bot with interactive exits (Alpaca).")
+    ap.add_argument("cmd", choices=["run", "plan"])
     ap.add_argument("--entry", default="10:34", help="entry time ET (HH:MM)")
     ap.add_argument("--exit", default="11:10", help="hard-close time ET (HH:MM)")
-    ap.add_argument("--target", type=float, default=0.30, help="combined take-profit, e.g. 0.30")
-    ap.add_argument("--itm", type=int, default=3, help="strikes in-the-money for each leg")
+    ap.add_argument("--target", default="0.30", help="combined take-profit (e.g. 0.30) or 'off'")
+    ap.add_argument("--call-target", default="off", help="call-leg take-profit or 'off'")
+    ap.add_argument("--put-target", default="off", help="put-leg take-profit or 'off'")
+    ap.add_argument("--stop", default="off", help="combined stop-loss, e.g. -0.5, or 'off'")
+    ap.add_argument("--itm", type=int, default=3, help="strikes in-the-money per leg")
     ap.add_argument("--qty", type=int, default=1, help="contracts per leg")
-    ap.add_argument("--poll", type=int, default=15, help="seconds between P/L checks")
-    ap.add_argument("--dry-run", action="store_true", help="select + schedule but never send orders")
+    ap.add_argument("--poll", type=int, default=15, help="seconds between refreshes")
+    ap.add_argument("--auto", action="store_true", help="no prompts: run armed rules + time only")
+    ap.add_argument("--dry-run", action="store_true", help="select + schedule, never order")
     ap.add_argument("--live", action="store_true", help="allow orders against a LIVE endpoint")
     a = ap.parse_args(sys.argv[1:] if argv is None else argv)
 
-    cfg = Config(entry=a.entry, exit=a.exit, target=a.target, itm=a.itm,
-                 qty=a.qty, poll=a.poll, dry_run=a.dry_run, live=a.live)
+    def opt(v):
+        return None if str(v).lower() in ("off", "none", "") else float(v)
+
+    cfg = Config(entry=a.entry, exit=a.exit, target=opt(a.target),
+                 call_target=opt(a.call_target), put_target=opt(a.put_target),
+                 stop=opt(a.stop), itm=a.itm, qty=a.qty, poll=a.poll,
+                 dry_run=a.dry_run, live=a.live, interactive=not a.auto)
     api = Alpaca()
     try:
         return cmd_plan(api, cfg) if a.cmd == "plan" else cmd_run(api, cfg)
@@ -254,7 +398,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Alpaca API error: {e}  {getattr(e.response, 'text', '')}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
-        print("\nInterrupted — check your open positions manually.", file=sys.stderr)
+        print("\nInterrupted — check open positions manually.", file=sys.stderr)
         return 130
 
 
