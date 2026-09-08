@@ -1,39 +1,43 @@
-# Live Prices Google Sheet — Webull & Coinbase
+# STREAM — Live Prices Google Sheet (Webull & Coinbase)
 
-A Google Sheet that shows **live BTC and Micro Gold Futures prices** from
-**Webull** and **Coinbase**, side by side.
+A formatted Google Sheet dashboard showing **live crypto and Micro Gold
+Futures prices** from **Coinbase** and **Webull**, side by side.
 
 **Your sheet:** https://docs.google.com/spreadsheets/d/1f-PdEabZIRoVFlcFGctp2_92q_2VjoGPztAAheBo8Rg/edit
 
-## What's in it
+## What it shows
 
-The sheet has two blocks:
+| Section | Rows | Coinbase | Webull |
+|---------|------|----------|--------|
+| CRYPTO | BTC, ETH, SOL, DOGE, XRP | price + 24h % | price + 24h % |
+| FUTURES | Micro Gold (MGC) | n/a (no gold on Coinbase) | price + 24h % |
+| Reference | COMEX Gold `GC=F` | live via Stooq (always works) | — |
 
-- **① Works now (no setup):** BTC and front-month gold future (COMEX `GC=F`,
-  same price as Micro Gold `MGC`) via built-in `IMPORTDATA` formulas from
-  Stooq. These are live the moment you open the sheet.
-- **② Exact Webull & Coinbase prices:** the specific exchange feeds you asked
-  for. Google Sheets can't read these APIs with a plain formula (they return
-  JSON), so a small Apps Script fetches them and refreshes every minute.
+One `setup()` run builds the whole formatted layout (title, colored headers,
+zebra rows, `$`/`%` number formats, green/red change colors, frozen headers)
+and turns on a once-a-minute auto-refresh.
 
-## One-time setup for Block ② (about 2 minutes)
+## One-time setup (about 2 minutes)
 
 1. Open the sheet → menu **Extensions ▸ Apps Script**.
-2. Delete the sample code, paste the contents of [`live_prices.gs`](./live_prices.gs), click **Save**.
-3. In the toolbar, pick the function **`installTrigger`** and click **Run**.
-   Approve the permission prompt (it fetches prices and writes them to the sheet).
-4. Done. Block ② refreshes automatically once a minute. Run **`refreshPrices`**
-   for an instant update.
+2. Delete any sample code, paste the contents of [`live_prices.gs`](./live_prices.gs), click **Save**.
+3. In the toolbar pick the function **`setup`** and click **Run**. Approve the
+   permission prompt (it fetches prices and edits this sheet).
+4. Done. The dashboard is built and refreshes every minute. Run
+   **`refreshPrices`** any time for an instant update; **`removeTrigger`** stops
+   the auto-refresh.
 
-## Notes / honest limitations
+## Add/remove coins
 
-- **Coinbase gold doesn't exist.** Coinbase is a crypto-only exchange — there
-  is no Coinbase gold-futures price anywhere, so that cell is marked `n/a`.
-  Block ①'s COMEX gold reference covers the live gold price instead.
-- **Coinbase BTC** uses the official public API — reliable.
-- **Webull** has no official public API. The script uses an unofficial endpoint,
-  so Webull cells are best-effort and may show `err` if Webull blocks the
-  request. The Webull **Micro Gold Futures** ticker id can change when the
-  front-month contract rolls; update `WEBULL_MGC_TICKER_ID` in the script if
-  that cell reads `err`.
+Edit the `CRYPTOS` array at the top of `live_prices.gs` (name, Coinbase product
+id like `ADA-USD`, Webull symbol like `ADAUSD`), then run `setup` again.
+
+## Honest limitations
+
+- **Coinbase has no gold futures** — it's a crypto-only exchange, so that cell
+  is `n/a`; the COMEX reference row covers the live gold price.
+- **Coinbase** uses the official public API (reliable). **Webull** has no
+  official API — the script tries several unofficial endpoints and auto-resolves
+  ticker ids, but if Webull blocks the request from Google's servers a Webull
+  cell will show `err`. That's a Webull-side limitation, not a bug in the sheet.
 - Not financial advice.
