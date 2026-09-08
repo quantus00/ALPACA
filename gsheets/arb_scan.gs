@@ -53,6 +53,10 @@ var EXCHANGES = [
   { id: 'KuCoin',     fee: 0.0010, quote: 'USDT',
     url: function (c) { return 'https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=' + c + '-USDT'; },
     parse: function (j) { return Number(j.data.price); } },
+  // Webull: no simple ticker URL — uses ticker-id resolution (best-effort,
+  // unofficial). Crypto fee is an estimate; set it to your real Webull tier.
+  { id: 'Webull',     fee: 0.0100, quote: 'USD',
+    fetch: function (c) { return webullCryptoPrice(c + 'USD'); } },
 ];
 
 // ---- Rough transfer time if you move coins between venues (minutes) --------
@@ -158,10 +162,15 @@ function scanCoin(sh, row, coin, notional, target) {
   for (var i = 0; i < EXCHANGES.length; i++) {
     var ex = EXCHANGES[i];
     try {
-      var res = UrlFetchApp.fetch(ex.url(coin),
-        { muteHttpExceptions: true, headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' } });
-      if (res.getResponseCode() >= 400) continue;
-      var p = ex.parse(JSON.parse(res.getContentText()));
+      var p;
+      if (ex.fetch) {                       // custom fetcher (e.g. Webull)
+        p = ex.fetch(coin);
+      } else {
+        var res = UrlFetchApp.fetch(ex.url(coin),
+          { muteHttpExceptions: true, headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' } });
+        if (res.getResponseCode() >= 400) continue;
+        p = ex.parse(JSON.parse(res.getContentText()));
+      }
       if (isFinite(p) && p > 0) quotes.push({ id: ex.id, price: p, fee: ex.fee });
     } catch (e) { /* skip this venue */ }
   }
@@ -200,4 +209,86 @@ function scanCoin(sh, row, coin, notional, target) {
 
   var band = ((row - ROW.dataStart) % 2 === 1) ? CLR.band : '#ffffff';
   sh.getRange(row, 2, 1, 9).setBackground(meets ? CLR.hit : band);
+}
+
+// ===========================================================================
+// Webull crypto quote (unofficial, best-effort) — same approach as STREAM.
+// If your Webull API token is added later, this can be made reliable.
+// ===========================================================================
+var WEBULL_KNOWN_IDS = { BTCUSD: 950160802 };
+
+function webullCryptoPrice(symbol) {
+  try {
+    return webullTry(webullCryptoUrls(webullId(symbol, 'crypto')));
+  } catch (e) {
+    PropertiesService.getScriptProperties().deleteProperty('WBID_' + symbol);
+    return webullTry(webullCryptoUrls(webullResolve(symbol, 'crypto')));
+  }
+}
+
+function webullCryptoUrls(id) {
+  return [
+    'https://quotes-gw.webullfintech.com/api/crypto/quote/tickerRealTimes?ids=' + id + '&more=1',
+    'https://quotes-gw.webullfintech.com/api/bgw/quote/realtime?ids=' + id,
+    'https://quotes-gw.webullfintech.com/api/quote/tickerRealTimes/full?ids=' + id,
+  ];
+}
+
+function webullTry(urls) {
+  var last = 'no data';
+  for (var i = 0; i < urls.length; i++) {
+    try {
+      var res = UrlFetchApp.fetch(urls[i], { muteHttpExceptions: true, headers: webullHeaders() });
+      if (res.getResponseCode() >= 400) { last = 'http ' + res.getResponseCode(); continue; }
+      var p = webullExtractPrice(JSON.parse(res.getContentText()));
+      if (isFinite(p) && p > 0) return p;
+      last = 'no price field';
+    } catch (e) { last = String(e); }
+  }
+  throw new Error(last);
+}
+
+function webullExtractPrice(json) {
+  var q = json;
+  if (q && q.data != null) q = q.data;
+  if (Array.isArray(q)) q = q[0];
+  if (!q || typeof q !== 'object') return NaN;
+  var keys = ['close', 'price', 'pPrice', 'tradePrice', 'lastPrice', 'latestPrice', 'deal', 'last'];
+  for (var i = 0; i < keys.length; i++) {
+    if (q[keys[i]] != null) { var v = Number(q[keys[i]]); if (isFinite(v) && v > 0) return v; }
+  }
+  return NaN;
+}
+
+function webullId(symbol, kind) {
+  if (WEBULL_KNOWN_IDS[symbol]) return WEBULL_KNOWN_IDS[symbol];
+  var cached = PropertiesService.getScriptProperties().getProperty('WBID_' + symbol);
+  return cached ? cached : webullResolve(symbol, kind);
+}
+
+function webullResolve(symbol, kind) {
+  var base = symbol.replace('USD', '');
+  var url = 'https://quotes-gw.webullfintech.com/api/search/pc/tickers?keyword=' +
+            encodeURIComponent(base) + '&pageIndex=1&pageSize=20&regionId=6';
+  var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, headers: webullHeaders() });
+  var list = (JSON.parse(res.getContentText()).data) || [];
+  var hit = null;
+  for (var i = 0; i < list.length; i++) {
+    var t = list[i];
+    var tmpl = (t.template || t.type || '').toLowerCase();
+    var sym = (t.symbol || t.disSymbol || '').toUpperCase();
+    if (tmpl.indexOf('crypto') >= 0 && (sym === symbol || sym.indexOf(base) >= 0)) { hit = t; break; }
+  }
+  if (!hit && list.length) hit = list[0];
+  if (!hit || !hit.tickerId) throw new Error('id not found: ' + symbol);
+  PropertiesService.getScriptProperties().setProperty('WBID_' + symbol, String(hit.tickerId));
+  return hit.tickerId;
+}
+
+function webullHeaders() {
+  var props = PropertiesService.getScriptProperties();
+  var did = props.getProperty('WB_DID');
+  if (!did) { did = Utilities.getUuid().replace(/-/g, ''); props.setProperty('WB_DID', did); }
+  return { 'did': did, 'App-Group': 'broker', 'Accept': 'application/json',
+           'User-Agent': 'Mozilla/5.0', 'Content-Type': 'application/json' };
 }
