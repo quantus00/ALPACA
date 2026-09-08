@@ -1,43 +1,49 @@
-# STREAM — Live Prices Google Sheet (Webull & Coinbase)
+# Google Sheets live-price tools (Webull & Coinbase)
 
-A formatted Google Sheet dashboard showing **live crypto and Micro Gold
-Futures prices** from **Coinbase** and **Webull**, side by side.
+Two Apps Script–powered Google Sheets.
 
-**Your sheet:** https://docs.google.com/spreadsheets/d/1f-PdEabZIRoVFlcFGctp2_92q_2VjoGPztAAheBo8Rg/edit
+## 1. STREAM — live prices ([`live_prices.gs`](./live_prices.gs))
 
-## What it shows
+https://docs.google.com/spreadsheets/d/1f-PdEabZIRoVFlcFGctp2_92q_2VjoGPztAAheBo8Rg/edit
 
-| Section | Rows | Coinbase | Webull |
-|---------|------|----------|--------|
-| CRYPTO | BTC, ETH, SOL, DOGE, XRP | price + 24h % | price + 24h % |
-| FUTURES | Micro Gold (MGC) | n/a (no gold on Coinbase) | price + 24h % |
-| Reference | COMEX Gold `GC=F` | live via Stooq (always works) | — |
+Tracks five instruments, refreshing every minute:
 
-One `setup()` run builds the whole formatted layout (title, colored headers,
-zebra rows, `$`/`%` number formats, green/red change colors, frozen headers)
-and turns on a once-a-minute auto-refresh.
+| Row | Source |
+|-----|--------|
+| BTC Spot — Coinbase | Coinbase official API (reliable) |
+| BTC Spot — Webull | Webull unofficial API (best-effort) |
+| BTC Perp | OKX → Bybit → Binance perp API |
+| Micro Gold **MGC** (per oz) | Stooq COMEX gold `GC` |
+| Gold **1 troy oz** | same per-oz gold price, ×1 notional |
+| Micro E-mini S&P **MES** | Stooq CME S&P `ES` |
 
-## One-time setup (about 2 minutes)
+MGC and "1 oz" share the same per-oz gold price — only the *contract value* column differs (MGC = price × 10 oz, 1 oz = price × 1). MES contract value = index × $5.
 
-1. Open the sheet → menu **Extensions ▸ Apps Script**.
-2. Delete any sample code, paste the contents of [`live_prices.gs`](./live_prices.gs), click **Save**.
-3. In the toolbar pick the function **`setup`** and click **Run**. Approve the
-   permission prompt (it fetches prices and edits this sheet).
-4. Done. The dashboard is built and refreshes every minute. Run
-   **`refreshPrices`** any time for an instant update; **`removeTrigger`** stops
-   the auto-refresh.
+## 2. ARB SCAN — cross-exchange spread scanner ([`arb_scan.gs`](./arb_scan.gs))
 
-## Add/remove coins
+https://docs.google.com/spreadsheets/d/1T4tW-vKiJ9kvsho47-uNofDQj0LokMYPvRfXg0m79AY/edit
 
-Edit the `CRYPTOS` array at the top of `live_prices.gs` (name, Coinbase product
-id like `ADA-USD`, Webull symbol like `ADAUSD`), then run `setup` again.
+For each coin, pulls live spot prices from **9 venues** (Coinbase, Kraken, Gemini,
+Bitstamp, Binance.US, Bybit, OKX, KuCoin, **Webull**), finds the cheapest buy and
+dearest sell, and computes net profit on your trade size after taker fees. Rows
+that clear the net target (default $20) are highlighted. Refreshes every 2 min.
 
-## Honest limitations
+## Setup (each sheet, one time)
 
-- **Coinbase has no gold futures** — it's a crypto-only exchange, so that cell
-  is `n/a`; the COMEX reference row covers the live gold price.
-- **Coinbase** uses the official public API (reliable). **Webull** has no
-  official API — the script tries several unofficial endpoints and auto-resolves
-  ticker ids, but if Webull blocks the request from Google's servers a Webull
-  cell will show `err`. That's a Webull-side limitation, not a bug in the sheet.
+1. Open the sheet → **Extensions ▸ Apps Script**.
+2. Delete any sample code, paste the matching `.gs` file, click **Save**.
+3. Run **`setup`**, approve the permission prompt.
+
+## Pause / resume
+
+Both scripts have **`pause`** and **`resume`** functions:
+- Run **`pause`** to stop auto-refresh (values freeze).
+- Run **`resume`** to start it again and refresh now.
+- Or use the ⏰ **Triggers** panel in Apps Script to delete/re-add the trigger.
+
+## Notes
+
+- Coinbase & the perp/spot exchange APIs are real-time; **Stooq is free but ~15–60 min delayed**, continuous front-month for futures.
+- **Webull** is an unofficial endpoint — best-effort, may show `err`. A Webull API token would make it reliable (and unlock MGC futures + order placement).
+- **Coinbase has no gold and no metals**; gold comes from Stooq (COMEX). Coinbase nano futures and Webull's futures API have no free live feed.
 - Not financial advice.

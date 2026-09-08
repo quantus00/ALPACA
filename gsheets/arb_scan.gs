@@ -74,14 +74,27 @@ function setup() {
   var sh = ss.getSheets()[0];
   sh.setName('ARB SCAN');
   buildArb(sh);
-  ScriptApp.getProjectTriggers().forEach(function (t) {
-    if (t.getHandlerFunction() === 'refreshArb') ScriptApp.deleteTrigger(t);
-  });
-  ScriptApp.newTrigger('refreshArb').timeBased().everyMinutes(2).create();
-  refreshArb();
+  resume();
 }
 
-function removeTrigger() {
+// PAUSE / RESUME the auto-scan.
+//   Run `pause`  to stop scanning (values freeze).
+//   Run `resume` to start it again (every 2 minutes) and scan now.
+function pause() {
+  killTriggers();
+  try { SpreadsheetApp.getActiveSpreadsheet().toast('Scan paused. Run "resume" to restart.', 'ARB SCAN', 5); } catch (e) {}
+}
+
+function resume() {
+  killTriggers();
+  ScriptApp.newTrigger('refreshArb').timeBased().everyMinutes(2).create();
+  refreshArb();
+  try { SpreadsheetApp.getActiveSpreadsheet().toast('Scan on (every 2 minutes).', 'ARB SCAN', 5); } catch (e) {}
+}
+
+function removeTrigger() { pause(); }   // backward-compatible alias
+
+function killTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === 'refreshArb') ScriptApp.deleteTrigger(t);
   });
