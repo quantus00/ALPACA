@@ -56,9 +56,9 @@ class AlpacaConfig:
 def load_config() -> AlpacaConfig:
     """Build configuration from the environment.
 
-    Recognized variables:
-      ALPACA_API_KEY_ID / APCA_API_KEY_ID       — API key id
-      ALPACA_API_SECRET_KEY / APCA_API_SECRET_KEY — API secret
+    Recognized variables (first match wins for each credential):
+      ALPACA_API_KEY_ID / APCA_API_KEY_ID / ALPACA_API_KEY          — API key id
+      ALPACA_API_SECRET_KEY / APCA_API_SECRET_KEY / ALPACA_API_SECRET — API secret
       ALPACA_PAPER                              — "true" (default) uses the paper
                                                   trading endpoint; "false" uses live
       ALPACA_TRADING_BASE_URL                   — override the trading endpoint
@@ -67,11 +67,13 @@ def load_config() -> AlpacaConfig:
     api_key = (
         os.environ.get("ALPACA_API_KEY_ID")
         or os.environ.get("APCA_API_KEY_ID")
+        or os.environ.get("ALPACA_API_KEY")  # matches the common straddle-bot env
         or ""
     ).strip()
     api_secret = (
         os.environ.get("ALPACA_API_SECRET_KEY")
         or os.environ.get("APCA_API_SECRET_KEY")
+        or os.environ.get("ALPACA_API_SECRET")  # matches the common straddle-bot env
         or ""
     ).strip()
 
