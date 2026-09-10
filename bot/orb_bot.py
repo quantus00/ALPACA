@@ -54,6 +54,12 @@ class ORBBot:
         self.pos = Position()
         self.realized = 0.0        # realized $ P&L since start
 
+        # Backtest bookkeeping (populated as bars are processed).
+        self.trades: list[dict] = []
+        self.equity_curve: list[tuple] = []   # (ts, equity) each bar
+        self.failed_date = None               # date the trailing DD first breached
+        self.target_date = None               # date the profit target was first hit
+
     # -- equity ---------------------------------------------------------------
     def _unrealized(self, price: float) -> float:
         if self.pos.side == 0:
@@ -65,11 +71,20 @@ class ORBBot:
         return self.guard.p.starting_balance + self.realized + self._unrealized(price)
 
     # -- order plumbing -------------------------------------------------------
-    def _flatten(self, price: float, why: str) -> None:
+    def _flatten(self, price: float, why: str, ts=None) -> None:
         if self.pos.side == 0:
             return
         pnl = self._unrealized(price)
         self.realized += pnl
+        self.trades.append({
+            "day": ts.date() if ts is not None else None,
+            "side": "long" if self.pos.side > 0 else "short",
+            "contracts": self.pos.contracts,
+            "entry": self.pos.entry,
+            "exit": price,
+            "pnl": pnl,
+            "reason": why,
+        })
         log.info("FLATTEN %s @ %.2f  (%s)  trade P&L=%+.2f  realized=%+.2f",
                  "long" if self.pos.side > 0 else "short", price, why, pnl, self.realized)
         if self.broker is not None:
@@ -88,15 +103,20 @@ class ORBBot:
         # 1) Account-level guard first (uses equity marked at this bar's close).
         signed = self.pos.side * self.pos.contracts
         decision = self.guard.update(ts, self.equity(c), signed)
+        self.equity_curve.append((ts, decision.equity))
+        if self.guard.failed and self.failed_date is None:
+            self.failed_date = ts.date()
+        if self.guard.target_reached and self.target_date is None:
+            self.target_date = ts.date()
         if decision.must_flatten:
-            self._flatten(c, decision.reason)
+            self._flatten(c, decision.reason, ts)
             return
 
         # 2) Strategy engine.
         sig = self.engine.on_bar(ts, o, h, l, c)
 
         if sig.action == "exit":
-            self._flatten(sig.price, sig.reason)
+            self._flatten(sig.price, sig.reason, ts)
         elif sig.action in ("enter_long", "enter_short") and self.pos.side == 0:
             if not decision.can_enter:
                 log.info("breakout blocked by guard: %s", decision.reason)

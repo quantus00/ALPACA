@@ -55,6 +55,8 @@ POINT_VALUES: dict[str, float] = {
     "YM": 5.0,      # E-mini Dow
     "M2K": 5.0,     # Micro E-mini Russell 2000
     "RTY": 50.0,    # E-mini Russell 2000
+    "MGC": 10.0,    # Micro Gold (0.10 tick = $1.00/tick)
+    "GC": 100.0,    # Full-size Gold (0.10 tick = $10.00/tick)
 }
 
 

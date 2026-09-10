@@ -23,6 +23,7 @@ class Instrument(str, Enum):
     BTC_NANO_PERP = "btc_nano_perp"   # Coinbase nano BTC perpetual future
     SPY_OPTIONS = "spy_options"       # Alpaca / Webull options
     MES_FUTURES = "mes_futures"       # Tradovate Micro E-mini S&P 500
+    MGC_FUTURES = "mgc_futures"       # Tradovate Micro Gold
 
 
 # Which brokers can trade which instrument. Used to validate the toggles.
@@ -31,6 +32,7 @@ INSTRUMENT_BROKERS: dict[Instrument, tuple[Broker, ...]] = {
     Instrument.BTC_NANO_PERP: (Broker.COINBASE,),
     Instrument.SPY_OPTIONS: (Broker.ALPACA, Broker.WEBULL),
     Instrument.MES_FUTURES: (Broker.TRADOVATE,),
+    Instrument.MGC_FUTURES: (Broker.TRADOVATE,),
 }
 
 # Default tradable symbol per instrument, per broker.
@@ -39,6 +41,14 @@ INSTRUMENT_SYMBOLS: dict[Instrument, str] = {
     Instrument.BTC_NANO_PERP: "BTC-PERP-INTX",
     Instrument.SPY_OPTIONS: "SPY",
     Instrument.MES_FUTURES: "MES",
+    Instrument.MGC_FUTURES: "MGC",
+}
+
+# Tick size (minimum price increment) per instrument. The ORB engine uses this
+# for the breakout buffer, so gold (0.10) must not inherit the MES/ES 0.25.
+INSTRUMENT_TICK_SIZES: dict[Instrument, float] = {
+    Instrument.MES_FUTURES: 0.25,
+    Instrument.MGC_FUTURES: 0.10,
 }
 
 
@@ -128,7 +138,9 @@ class Config:
 
         return ORBParams(
             or_minutes=self.orb_minutes,
-            tick_size=self.orb_tick_size,
+            # Gold ticks at 0.10; index micros at 0.25. Instrument wins over the
+            # BOT_ORB_TICK_SIZE default so MGC never inherits the MES increment.
+            tick_size=INSTRUMENT_TICK_SIZES.get(self.instrument, self.orb_tick_size),
             entry_buffer_ticks=self.orb_buffer_ticks,
             stop="fixed" if self.challenge_stop_points > 0 else "range",
             stop_points=self.challenge_stop_points,
