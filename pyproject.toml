@@ -12,14 +12,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["mcp[cli]>=2.0.0"]
+dev = ["mcp[cli]>=2.0.0", "pytest>=8.0"]
+# ICC trading bot broker SDKs (install only the venue you use):
+coinbase = ["coinbase-advanced-py>=1.2"]
+webull = ["webull>=0.6"]
 
 [project.scripts]
 alpaca-mcp = "alpaca_mcp.server:main"
+icc-bot = "icc_bot.runner:run_forever"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/alpaca_mcp"]
+packages = ["src/alpaca_mcp", "src/icc_bot"]
