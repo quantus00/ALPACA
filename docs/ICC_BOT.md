@@ -85,6 +85,25 @@ order it *would* have placed.
 3. Move to **paper** (Webull) and watch fills/PnL.
 4. Only then consider a tiny **live** allocation — and keep the daily-loss kill switch tight.
 
+## Calibration from the wider SCI material
+
+Beyond the 14 core lessons, the trader's second (more granular) course and vlogs
+were reviewed. They re-teach the same method; the concrete settings worth pinning:
+
+- **Swing sensitivity:** *Pivot Points High Low* length ≈ **5** → `ICC_HTF_LOOKBACK=5`, `ICC_LTF_LOOKBACK=3` (now the defaults).
+- **Frequency:** **1–2 trades/week** → `ICC_MAX_TRADES_PER_DAY=2` default.
+- **R:R:** **1:3–1:4** → `ICC_TARGET_RR=3.0` (raise to 4.0 to match his upper end).
+- **Alignment:** he wants 4H + 1H (± 30m) all agreeing before entry.
+- **No trailing stop**; partials at the first target, hold the rest while structure holds.
+
+### His primary instrument isn't on these venues ⚠️
+
+He trades mostly **spot gold (XAUUSD)** and **NASDAQ**, neither of which Coinbase
+(crypto only) or Webull (US equities) offers as-is. Closest proxies:
+- Gold → **PAXG-USD** (tokenized gold) on Coinbase, or **GLD/IAU** ETF on Webull.
+- Nasdaq → **QQQ** ETF on Webull.
+These track his instruments but are **not identical** (hours, spreads, gaps differ).
+
 ## Limitations
 
 - Deterministic pivots won't always agree with a human's eye for swings.

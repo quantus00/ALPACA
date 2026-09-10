@@ -55,15 +55,18 @@ def load_config() -> BotConfig:
         session_end_utc=int(_env("ICC_SESSION_END_UTC", "16")),
         session_enabled=_env("ICC_SESSION_ENABLED", "true").lower() in _TRUTHY,
         params=ICCParams(
-            htf_lookback=int(_env("ICC_HTF_LOOKBACK", "2")),
-            ltf_lookback=int(_env("ICC_LTF_LOOKBACK", "2")),
-            target_rr=float(_env("ICC_TARGET_RR", "3.0")),
+            # Pivot length ~5 matches the trader's "Pivot Points High Low"
+            # setting ("crank it down to five", course 2 day 1).
+            htf_lookback=int(_env("ICC_HTF_LOOKBACK", "5")),
+            ltf_lookback=int(_env("ICC_LTF_LOOKBACK", "3")),
+            target_rr=float(_env("ICC_TARGET_RR", "3.0")),  # course: 1:3 to 1:4
         ),
         risk=RiskLimits(
             risk_per_trade_pct=float(_env("ICC_RISK_PCT", "1.0")),
             max_daily_loss_pct=float(_env("ICC_MAX_DAILY_LOSS_PCT", "3.0")),
             max_open_positions=int(_env("ICC_MAX_OPEN", "1")),
-            max_trades_per_day=int(_env("ICC_MAX_TRADES_PER_DAY", "3")),
+            # Course emphasizes 1–2 trades/week; keep the daily throttle tight.
+            max_trades_per_day=int(_env("ICC_MAX_TRADES_PER_DAY", "2")),
             max_position_pct=float(_env("ICC_MAX_POSITION_PCT", "25.0")),
         ),
     )
