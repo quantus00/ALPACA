@@ -181,12 +181,66 @@ table showing peak equity, the trail floor and your remaining buffer.
 
 ---
 
-## 5. Tests
+## 5. Opening Range Breakout — the challenge strategy
+
+`bot/orb.py` + `bot/orb_bot.py` implement the **Opening Range Breakout (ORB)**,
+the most rigorously documented intraday edge for index products and the one that
+fits a trailing-drawdown evaluation best:
+
+- it trades the **RTH open**, where the volume and clean directional moves are;
+- risk is **hard-defined** — the stop sits at the opposite edge of the opening
+  range, so the guard can size every trade to a *known* max loss;
+- it takes **one (or few) trades a day** — the discipline these accounts reward;
+- it is **flat by the session close**, dovetailing with the flat-by-5pm rule.
+
+**Rules** (all configurable via `BOT_ORB_*`):
+
+1. Opening range = high/low of the first `BOT_ORB_MINUTES` of RTH (default 15m).
+2. Enter on a breakout of the range by `BOT_ORB_BUFFER_TICKS` (long above, short below).
+3. Stop = opposite edge of the range (or a fixed `BOT_CHALLENGE_STOP_POINTS`).
+4. Target = `BOT_ORB_TARGET_R` × risk (0 → hold to the end-of-day flatten).
+5. Skip days whose range is too tight/wide; cap at `BOT_ORB_MAX_TRADES` per day.
+
+**End to end**, `bot/orb_bot.py` runs `ORB → ChallengeGuard → broker`: the guard
+sizes each entry to the breakout's own risk *and* the remaining daily/trailing
+buffers, force-flattens at 5pm, and halts once the target is banked.
+
+```bash
+python -m bot.orb_bot                 # offline selftest: 2 clean ORB days, guard-sized
+python -m bot.orb_bot poll --broker tradovate --instrument mes_futures --symbol MES
+```
+
+Backtest it in TradingView with `pinescript/opening_range_breakout_strategy.pine`
+(ORB entries + the full challenge guardrails + a live buffer/floor table).
+
+**Research it's based on** — the ORB literature:
+
+- Zarattini, Barbon & Aziz, *A Profitable Day Trading Strategy for the U.S.
+  Equity Market* (Swiss Finance Institute, 2024) — [SSRN 4729284](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4729284)
+- Zarattini & Aziz, *Can Day Trading Really Be Profitable?* — [SSRN 4416622](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4416622)
+
+> **Honest note.** No strategy *guarantees* passing an evaluation — if one did,
+> the firms couldn't sell them (pass rates are in the single digits). ORB is a
+> well-studied edge with positive expectancy *in the studied markets and
+> periods*, and independent work also documents its limits on some instruments
+> (e.g. a falsification study on MNQ, [arXiv 2605.04004](https://arxiv.org/pdf/2605.04004)).
+> What this code gives you is a **disciplined, mechanical, backtestable**
+> framework that (a) trades a researched edge and (b) makes it structurally
+> impossible to break the daily-loss / trailing-drawdown / flat-by-5pm rules.
+> **Backtest on your instrument, then forward-test on the firm's demo/eval
+> before risking a fee.** For education/research; trading involves substantial
+> risk of loss.
+
+---
+
+## 6. Tests
 
 ```bash
 python tests/test_trend.py           # market-structure engine
 python tests/test_risk.py            # challenge guard (target, DD, session, sizing)
-python tests/test_strategy_guard.py  # guard gates the strategy runner
+python tests/test_strategy_guard.py  # guard gates the trend runner
+python tests/test_orb.py             # ORB engine (breakout, stop, target, filters)
+python tests/test_orb_bot.py         # ORB + guard + broker end to end
 # or, if installed:  pytest tests/
 ```
 

@@ -84,6 +84,15 @@ class Config:
     challenge_trailing_mode: str = os.getenv("BOT_CHALLENGE_TRAILING_MODE", "intraday")
     challenge_stop_points: float = float(os.getenv("BOT_CHALLENGE_STOP_POINTS", "5"))
 
+    # ---- Opening Range Breakout (ORB) strategy ------------------------------
+    orb_minutes: int = int(os.getenv("BOT_ORB_MINUTES", "15"))
+    orb_target_r: float = float(os.getenv("BOT_ORB_TARGET_R", "2"))
+    orb_buffer_ticks: float = float(os.getenv("BOT_ORB_BUFFER_TICKS", "1"))
+    orb_tick_size: float = float(os.getenv("BOT_ORB_TICK_SIZE", "0.25"))
+    orb_max_trades: int = int(os.getenv("BOT_ORB_MAX_TRADES", "1"))
+    orb_min_points: float = float(os.getenv("BOT_ORB_MIN_POINTS", "0"))
+    orb_max_points: float = float(os.getenv("BOT_ORB_MAX_POINTS", "1e12"))
+
     # ---- Runtime knobs -------------------------------------------------------
     dry_run: bool = _env_bool("BOT_DRY_RUN", True)
     webhook_host: str = os.getenv("BOT_WEBHOOK_HOST", "0.0.0.0")
@@ -111,6 +120,22 @@ class Config:
             daily_loss_limit=self.challenge_daily_loss,
             trailing_drawdown=self.challenge_trailing_dd,
             trailing_mode=self.challenge_trailing_mode,
+        )
+
+    def build_orb_params(self):
+        """Construct :class:`bot.orb.ORBParams` from these toggles."""
+        from .orb import ORBParams
+
+        return ORBParams(
+            or_minutes=self.orb_minutes,
+            tick_size=self.orb_tick_size,
+            entry_buffer_ticks=self.orb_buffer_ticks,
+            stop="fixed" if self.challenge_stop_points > 0 else "range",
+            stop_points=self.challenge_stop_points,
+            target_r=self.orb_target_r,
+            max_trades_per_day=self.orb_max_trades,
+            min_or_points=self.orb_min_points,
+            max_or_points=self.orb_max_points,
         )
 
     def validate(self) -> None:

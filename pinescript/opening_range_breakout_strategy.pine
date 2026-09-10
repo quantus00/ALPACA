@@ -1,0 +1,175 @@
+//@version=5
+// =============================================================================
+// OPENING RANGE BREAKOUT + PROP-CHALLENGE GUARDRAILS — BACKTEST (TradingView)
+// -----------------------------------------------------------------------------
+// The most rigorously documented intraday edge (Opening Range Breakout; see
+// Zarattini, Barbon & Aziz, "A Profitable Day Trading Strategy for the U.S.
+// Equity Market", Swiss Finance Institute 2024) wrapped in the full funded-
+// account rule set so you can backtest whether it SURVIVES the evaluation:
+//
+//   ENTRY  — break of the first N-minute opening range (+ buffer), long above /
+//            short below, first break of the day only (configurable count).
+//   STOP   — opposite edge of the opening range (or a fixed # of points).
+//   TARGET — R multiple of the stop distance (0 = hold to the session close).
+//   GUARD  — profit target, daily loss cap, trailing drawdown (intraday OR
+//            end-of-day close), and a hard flatten by 5pm ET / no overnight.
+//
+// Mirrors bot/orb.py + bot/risk.py (the live Python engine + guard). Read the
+// Strategy Tester and the status table (peak equity / trail floor / buffer).
+//
+// TIP: run on 1m-15m of MES/ES with the exchange session so the ET clock lines up.
+// =============================================================================
+strategy("ORB + Prop Guardrails — Backtest", overlay=true,
+     default_qty_type=strategy.fixed, default_qty_value=1,
+     initial_capital=50000, commission_type=strategy.commission.cash_per_contract,
+     commission_value=0.0, pyramiding=0, calc_on_every_tick=false,
+     process_orders_on_close=true, max_labels_count=500)
+
+// ----------------------------------------------------------------------------- Inputs
+grpORB    = "Opening Range Breakout"
+orMin     = input.int(15, "Opening range length (min)", minval=1, group=grpORB)
+bufTicks  = input.float(1, "Breakout buffer (ticks)", minval=0, group=grpORB)
+tickSz    = input.float(0.25, "Tick size", minval=0.0001, group=grpORB)
+stopMode  = input.string("Opposite OR edge", "Stop", options=["Opposite OR edge", "Fixed points"], group=grpORB)
+stopPts   = input.float(5, "Fixed stop (points)", minval=0.25, group=grpORB)
+targetR   = input.float(2, "Target (R multiple, 0=EOD)", minval=0, group=grpORB)
+qty       = input.int(1, "Contracts per trade", minval=1, group=grpORB)
+allowLong = input.bool(true, "Allow longs", group=grpORB)
+allowShort= input.bool(true, "Allow shorts", group=grpORB)
+minORpts  = input.float(0, "Skip if OR width <", minval=0, group=grpORB)
+maxORpts  = input.float(1e9, "Skip if OR width >", minval=0, group=grpORB)
+
+grpRules  = "Challenge rules ($)"
+profitTgt = input.float(1500, "Profit target",     minval=1, group=grpRules)
+dailyLoss = input.float(500,  "Daily loss limit",  minval=1, group=grpRules)
+trailDD   = input.float(1000, "Trailing drawdown", minval=1, group=grpRules)
+trailMode = input.string("Intraday (equity high-water)", "Trailing basis",
+     options=["Intraday (equity high-water)", "End of day (close)"], group=grpRules)
+freezeAtBE= input.bool(true, "Freeze trail at starting balance", group=grpRules)
+
+grpSess   = "Session (ET)"
+rthSH = input.int(9,  "RTH start hour",   minval=0, maxval=23, group=grpSess)
+rthSM = input.int(30, "RTH start minute", minval=0, maxval=59, group=grpSess)
+noNewH= input.int(15, "No new entries after hour",   minval=0, maxval=23, group=grpSess)
+noNewM= input.int(0,  "No new entries after minute", minval=0, maxval=59, group=grpSess)
+flatH = input.int(17, "Force flat hour", minval=0, maxval=23, group=grpSess)
+flatM = input.int(0,  "Force flat minute", minval=0, maxval=59, group=grpSess)
+
+// ----------------------------------------------------------------------------- ET clock
+etH = hour(time, "America/New_York")
+etM = minute(time, "America/New_York")
+etMinOfDay = etH * 60 + etM
+rthStart   = rthSH * 60 + rthSM
+orEnd      = rthStart + orMin
+noNew      = noNewH * 60 + noNewM
+flatCut    = flatH * 60 + flatM
+
+inOR       = etMinOfDay >= rthStart and etMinOfDay < orEnd
+canEnterTime = etMinOfDay >= orEnd and etMinOfDay < noNew
+mustFlatten  = etMinOfDay >= flatCut and etMinOfDay < (18 * 60)
+newDay = ta.change(dayofmonth(time, "America/New_York")) != 0
+
+// ----------------------------------------------------------------------------- Opening range
+var float orHigh = na
+var float orLow  = na
+var bool  orLocked = false
+var bool  daySkip  = false
+var int   tradesToday = 0
+if newDay
+    orHigh := na, orLow := na, orLocked := false, daySkip := false, tradesToday := 0
+if inOR
+    orHigh := na(orHigh) ? high : math.max(orHigh, high)
+    orLow  := na(orLow)  ? low  : math.min(orLow, low)
+if not orLocked and etMinOfDay >= orEnd
+    orLocked := true
+    w = na(orHigh) or na(orLow) ? na : orHigh - orLow
+    daySkip := na(w) or w < minORpts or w > maxORpts
+
+buf = bufTicks * tickSz
+longLevel  = na(orHigh) ? na : orHigh + buf
+shortLevel = na(orLow)  ? na : orLow  - buf
+
+// ----------------------------------------------------------------------------- Account guard
+startBal = strategy.initial_capital
+eq = strategy.equity
+var float dayStart = startBal
+if newDay
+    dayStart := eq
+var float peak = startBal
+isEod = trailMode == "End of day (close)"
+if isEod
+    if mustFlatten
+        peak := math.max(peak, eq)
+else
+    peak := math.max(peak, eq)
+floorRaw = peak - trailDD
+floorLvl = freezeAtBE ? math.min(floorRaw, startBal) : floorRaw
+
+totalPnl = eq - startBal
+dailyPnl = eq - dayStart
+var bool failed = false
+var bool passed = false
+var bool dayLock = false
+if newDay
+    dayLock := false
+if not failed and eq <= floorLvl
+    failed := true
+if not passed and totalPnl >= profitTgt
+    passed := true
+if not dayLock and dailyPnl <= -dailyLoss
+    dayLock := true
+
+halted    = failed or passed
+forceFlat = failed or passed or dayLock or mustFlatten
+blockEntry= halted or dayLock or mustFlatten or not canEnterTime or daySkip
+
+// ----------------------------------------------------------------------------- Orders
+flat = strategy.position_size == 0
+
+if forceFlat
+    strategy.close_all(comment = failed ? "DD FAIL" : passed ? "TARGET" : dayLock ? "DAY LOSS" : "5PM FLAT")
+else if flat and not blockEntry and tradesToday < 1 and not na(orHigh)
+    longBrk  = allowLong  and high >= longLevel
+    shortBrk = allowShort and low  <= shortLevel
+    if longBrk and shortBrk
+        if close >= open
+            shortBrk := false
+        else
+            longBrk := false
+    if longBrk
+        stopL = stopMode == "Fixed points" ? longLevel - stopPts : orLow
+        riskL = longLevel - stopL
+        tgtL  = targetR > 0 ? longLevel + targetR * riskL : na
+        strategy.entry("L", strategy.long, qty=qty, limit=longLevel)
+        strategy.exit("Lx", "L", stop=stopL, limit=tgtL)
+        tradesToday := 1
+    else if shortBrk
+        stopS = stopMode == "Fixed points" ? shortLevel + stopPts : orHigh
+        riskS = stopS - shortLevel
+        tgtS  = targetR > 0 ? shortLevel - targetR * riskS : na
+        strategy.entry("S", strategy.short, qty=qty, limit=shortLevel)
+        strategy.exit("Sx", "S", stop=stopS, limit=tgtS)
+        tradesToday := 1
+
+// End-of-day exit for the target=EOD case (before the 5pm hard flat).
+if not flat and etMinOfDay >= (15 * 60 + 55) and not forceFlat
+    strategy.close_all(comment="EOD")
+
+// ----------------------------------------------------------------------------- Visuals
+plot(orLocked ? orHigh : na, "OR high", color.new(color.teal, 0), style=plot.style_linebr)
+plot(orLocked ? orLow  : na, "OR low",  color.new(color.maroon, 0), style=plot.style_linebr)
+bgcolor(inOR ? color.new(color.blue, 90) : na)
+bgcolor(mustFlatten ? color.new(color.orange, 88) : na)
+plotshape(failed and not failed[1], "DD fail", shape.xcross, location.top, color.red, size=size.small)
+plotshape(passed and not passed[1], "Target",  shape.flag,   location.top, color.green, size=size.small)
+
+var table tb = table.new(position.bottom_right, 2, 6, border_width=1)
+if barstate.islast
+    st = failed ? "FAILED (DD)" : passed ? "PASSED (target)" : dayLock ? "DAY LOCKED" : "trading"
+    table.cell(tb, 0, 0, "ORB Challenge", text_color=color.white, bgcolor=color.new(color.blue, 0))
+    table.cell(tb, 1, 0, st, text_color=color.white, bgcolor=color.new(color.blue, 0))
+    table.cell(tb, 0, 1, "Net P&L"),  table.cell(tb, 1, 1, str.tostring(totalPnl, "#.##"), text_color = totalPnl >= 0 ? color.green : color.red)
+    table.cell(tb, 0, 2, "Day P&L"),  table.cell(tb, 1, 2, str.tostring(dailyPnl, "#.##"), text_color = dailyPnl >= 0 ? color.green : color.red)
+    table.cell(tb, 0, 3, "Peak eq"),  table.cell(tb, 1, 3, str.tostring(peak, "#.##"))
+    table.cell(tb, 0, 4, "Trail floor"), table.cell(tb, 1, 4, str.tostring(floorLvl, "#.##"))
+    table.cell(tb, 0, 5, "Buffer"),   table.cell(tb, 1, 5, str.tostring(eq - floorLvl, "#.##"), text_color = (eq - floorLvl) > 0 ? color.green : color.red)
