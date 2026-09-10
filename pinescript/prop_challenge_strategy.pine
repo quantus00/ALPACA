@@ -1,0 +1,176 @@
+//@version=5
+// =============================================================================
+// PROP-FIRM TRAILING-DRAWDOWN CHALLENGE — BACKTEST STRATEGY (TradingView only)
+// -----------------------------------------------------------------------------
+// A strategy() wrapper that backtests whether a directional edge SURVIVES a
+// funded-account evaluation, not just whether it is profitable. It layers the
+// full challenge rule set on top of a market-structure trend entry:
+//
+//   * PROFIT TARGET  — bank the win: close all and stop once net P&L hits it.
+//   * DAILY LOSS CAP — close all and stand down for the rest of the ET day.
+//   * TRAILING DRAWDOWN — a high-water mark trails equity up; touch
+//       (peak - drawdown) and the account is FAILED (no more trades).
+//       Toggle intraday (equity high-water) vs end-of-day (close) trailing.
+//   * FLAT BY 5PM ET / NO OVERNIGHT — entries only inside the RTH window up to
+//       a no-new cutoff; a hard flatten at 17:00 ET; the thin 6pm+ session and
+//       the 5-6pm CME maintenance gap are never traded.
+//
+// The floor optionally freezes at the starting balance (breakeven), matching
+// firms whose trail stops trailing once you have banked the buffer.
+//
+// This mirrors bot/risk.py (the live Python guard). Read the Strategy Tester +
+// the on-chart status table to see the max intraday drawdown vs your buffer.
+//
+// TIP: run intraday (e.g. 5m/15m) on an index future (MES/ES) with the
+// exchange session so the ET clock lines up.
+// =============================================================================
+strategy("Prop Challenge — Trailing Drawdown Backtest", overlay=true,
+     default_qty_type=strategy.fixed, default_qty_value=1,
+     initial_capital=50000, commission_type=strategy.commission.cash_per_contract,
+     commission_value=0.0, pyramiding=0, calc_on_every_tick=false,
+     process_orders_on_close=true, max_labels_count=500)
+
+// ----------------------------------------------------------------------------- Inputs
+grpRules  = "Challenge rules ($)"
+profitTgt = input.float(1500, "Profit target",        minval=1,  group=grpRules)
+dailyLoss = input.float(500,  "Daily loss limit",     minval=1,  group=grpRules)
+trailDD   = input.float(1000, "Trailing drawdown",    minval=1,  group=grpRules)
+trailMode = input.string("Intraday (equity high-water)", "Trailing basis",
+     options=["Intraday (equity high-water)", "End of day (close)"], group=grpRules)
+freezeAtBE = input.bool(true, "Freeze trail at starting balance (breakeven)",
+     group=grpRules, tooltip="Floor stops trailing once it reaches your start balance.")
+
+grpSess   = "Session (exchange time, ET)"
+rthStartH = input.int(9,  "RTH start hour",   minval=0, maxval=23, group=grpSess)
+rthStartM = input.int(30, "RTH start minute", minval=0, maxval=59, group=grpSess)
+noNewH    = input.int(16, "No new entries after hour",   minval=0, maxval=23, group=grpSess)
+noNewM    = input.int(55, "No new entries after minute", minval=0, maxval=59, group=grpSess)
+flatH     = input.int(17, "Force flat hour", minval=0, maxval=23, group=grpSess)
+flatM     = input.int(0,  "Force flat minute", minval=0, maxval=59, group=grpSess)
+
+grpEntry  = "Entry (market structure)"
+pivotLen  = input.int(5, "Pivot lookback (bars each side)", minval=1, group=grpEntry)
+trendTF   = input.timeframe("240", "Trend timeframe", group=grpEntry)
+allowLong = input.bool(true,  "Allow longs",  group=grpEntry)
+allowShort= input.bool(true,  "Allow shorts", group=grpEntry)
+qty       = input.int(1, "Contracts per trade", minval=1, group=grpEntry)
+
+// ----------------------------------------------------------------------------- ET clock
+etHour = hour(time, "America/New_York")
+etMin  = minute(time, "America/New_York")
+etMinOfDay   = etHour * 60 + etMin
+rthStart     = rthStartH * 60 + rthStartM
+noNewCutoff  = noNewH * 60 + noNewM
+flatCutoff   = flatH * 60 + flatM
+
+inEntryWindow = etMinOfDay >= rthStart and etMinOfDay < noNewCutoff
+mustFlatten   = etMinOfDay >= flatCutoff and etMinOfDay < (18 * 60)   // 5-6pm gap
+
+// New ET trading day (used to reset the daily loss anchor).
+newDay = ta.change(dayofmonth(time, "America/New_York")) != 0
+
+// ----------------------------------------------------------------------------- Market-structure trend (HH/HL up, LH/LL down; both legs flip)
+f_state() =>
+    ph = ta.pivothigh(pivotLen, pivotLen)
+    pl = ta.pivotlow(pivotLen, pivotLen)
+    var float lph = na, var float pph = na
+    var float lpl = na, var float ppl = na
+    if not na(ph)
+        pph := lph, lph := ph
+    if not na(pl)
+        ppl := lpl, lpl := pl
+    hh = not na(lph) and not na(pph) and lph > pph
+    lh = not na(lph) and not na(pph) and lph < pph
+    hl = not na(lpl) and not na(ppl) and lpl > ppl
+    ll = not na(lpl) and not na(ppl) and lpl < ppl
+    var int st = 0
+    if hh and hl and st != 1
+        st := 1
+    else if lh and ll and st != -1
+        st := -1
+    st
+
+trend = request.security(syminfo.tickerid, trendTF, f_state(), lookahead=barmerge.lookahead_off)
+flipUp   = trend == 1  and trend[1] != 1
+flipDown = trend == -1 and trend[1] != -1
+
+// ----------------------------------------------------------------------------- Account state & guard
+startBal = strategy.initial_capital
+equityNow = strategy.equity                       // capital + closed + open P&L
+
+var float dayStartEquity = startBal
+if newDay
+    dayStartEquity := equityNow
+
+var float peak = startBal
+isEod = trailMode == "End of day (close)"
+if isEod
+    // Only ratchet the trail on the end-of-day close (when we are flat).
+    if mustFlatten
+        peak := math.max(peak, equityNow)
+else
+    peak := math.max(peak, equityNow)
+
+floorRaw = peak - trailDD
+floorLvl = freezeAtBE ? math.min(floorRaw, startBal) : floorRaw
+
+totalPnl = equityNow - startBal
+dailyPnl = equityNow - dayStartEquity
+
+var bool failed = false          // trailing drawdown breached (terminal)
+var bool passed = false          // profit target reached (terminal)
+var bool dayLocked = false       // daily loss hit (resets next day)
+if newDay
+    dayLocked := false
+
+if not failed and equityNow <= floorLvl
+    failed := true
+if not passed and totalPnl >= profitTgt
+    passed := true
+if not dayLocked and dailyPnl <= -dailyLoss
+    dayLocked := true
+
+halted     = failed or passed
+blockEntry = halted or dayLocked or mustFlatten or not inEntryWindow
+forceFlat  = failed or passed or dayLocked or mustFlatten
+
+// ----------------------------------------------------------------------------- Orders
+if forceFlat
+    strategy.close_all(comment = failed ? "DD FAIL" : passed ? "TARGET" : dayLocked ? "DAY LOSS" : "5PM FLAT")
+else
+    longSig  = allowLong  and flipUp
+    shortSig = allowShort and flipDown
+    if not blockEntry
+        if longSig
+            strategy.entry("L", strategy.long,  qty=qty)
+        if shortSig
+            strategy.entry("S", strategy.short, qty=qty)
+    // Exit on an opposite structure flip even when new entries are blocked.
+    if strategy.position_size > 0 and flipDown
+        strategy.close("L", comment="flip")
+    if strategy.position_size < 0 and flipUp
+        strategy.close("S", comment="flip")
+
+// ----------------------------------------------------------------------------- Status table
+var table tb = table.new(position.bottom_right, 2, 6, border_width=1)
+if barstate.islast
+    stateTxt = failed ? "FAILED (DD)" : passed ? "PASSED (target)" : dayLocked ? "DAY LOCKED" : "trading"
+    table.cell(tb, 0, 0, "Prop Challenge", text_color=color.white, bgcolor=color.new(color.blue, 0))
+    table.cell(tb, 1, 0, stateTxt, text_color=color.white, bgcolor=color.new(color.blue, 0))
+    table.cell(tb, 0, 1, "Net P&L")
+    table.cell(tb, 1, 1, str.tostring(totalPnl, "#.##"), text_color = totalPnl >= 0 ? color.green : color.red)
+    table.cell(tb, 0, 2, "Day P&L")
+    table.cell(tb, 1, 2, str.tostring(dailyPnl, "#.##"), text_color = dailyPnl >= 0 ? color.green : color.red)
+    table.cell(tb, 0, 3, "Peak equity")
+    table.cell(tb, 1, 3, str.tostring(peak, "#.##"))
+    table.cell(tb, 0, 4, "Trail floor")
+    table.cell(tb, 1, 4, str.tostring(floorLvl, "#.##"))
+    table.cell(tb, 0, 5, "Buffer to floor")
+    table.cell(tb, 1, 5, str.tostring(equityNow - floorLvl, "#.##"),
+         text_color = (equityNow - floorLvl) > 0 ? color.green : color.red)
+
+// Shade the tradable window and mark terminal events.
+bgcolor(inEntryWindow and not halted ? color.new(color.green, 92) : na)
+bgcolor(mustFlatten ? color.new(color.orange, 88) : na)
+plotshape(failed and not failed[1], "DD fail", shape.xcross, location.top, color.red, size=size.small)
+plotshape(passed and not passed[1], "Target",  shape.flag,   location.top, color.green, size=size.small)

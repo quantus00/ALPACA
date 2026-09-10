@@ -47,7 +47,15 @@ def _run_poll(cfg: Config) -> None:
         try:
             sig = runner.evaluate()
             log.info("4H=%s align=%s -> %s", sig.trend.label(), sig.aligned, sig.action)
-            if sig.action in ("buy", "sell"):
+            if sig.risk is not None:
+                log.info("challenge: %s | total=%+.0f daily=%+.0f floor=%.0f buffer=%.0f",
+                         sig.risk.reason, sig.risk.total_pnl, sig.risk.daily_pnl,
+                         sig.risk.floor, sig.risk.buffer_to_floor)
+            if sig.action == "flatten":
+                res = broker.flatten()
+                log.warning("FLATTEN (%s): %s",
+                            sig.risk.reason if sig.risk else "risk", res.ok)
+            elif sig.action in ("buy", "sell"):
                 res = broker.place_order(sig.action, cfg.contract_size)
                 if res.ok:
                     notifier.notify_entry(sig.action, res.symbol, sig.price,
