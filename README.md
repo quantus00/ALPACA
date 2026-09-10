@@ -132,10 +132,62 @@ timeframes agree; the trigger re-arms once alignment is lost.
 
 ---
 
-## 4. Tests
+## 4. Prop-firm challenge guard (trailing drawdown)
+
+`bot/risk.py` is a self-contained risk layer for passing a **trailing-drawdown
+evaluation** (Topstep / Apex / TPT style). It turns a raw signal into something
+that respects the whole rulebook, checked on every tick:
+
+| Rule | Default | Behaviour |
+|------|---------|-----------|
+| **Profit target** | `+$1,500` | Pass condition — halt and lock the win in |
+| **Daily loss limit** | `$500` | Flatten + stand down for the day; re-arms next session |
+| **Trailing drawdown** | `$1,000` | High-water mark trails equity up; touch `peak − DD` → account failed |
+| **Flat by 5pm ET** | 17:00 | Hard flatten in the 5–6pm CME maintenance gap |
+| **No overnight** | RTH only | Entries only inside the RTH window, up to a 16:55 cutoff |
+
+Two trailing modes — **confirm which your firm uses:**
+
+- `intraday` — the trail follows the intraday **peak equity** (unrealized counts
+  against you). Harsher.
+- `eod` — the trail only ratchets on the **end-of-day closing balance**, so a
+  green day you flatten into *permanently* locks the gain into your buffer.
+
+The floor also **freezes at your starting balance** once reached, matching firms
+whose trail stops trailing at breakeven.
+
+```python
+from bot.risk import ChallengeGuard, ChallengeParams
+
+guard = ChallengeGuard(ChallengeParams(trailing_mode="eod"))
+d = guard.update(now, equity=50_000, position=0)   # now = ET datetime
+if d.can_enter:
+    contracts = guard.size_for(d, stop_points=5, symbol="MES")  # never oversize
+elif d.must_flatten:
+    ...  # close everything: hit 5pm, daily loss, or a breach
+```
+
+`size_for` caps size to the **smaller** of the remaining daily and trailing
+buffers, so a single stop-out can never breach a limit.
+
+Enable it in the live bot via `.env` (`BOT_CHALLENGE_ENABLED=true` + the
+`BOT_CHALLENGE_*` toggles); the `StrategyRunner` then vetoes entries and forces
+flattens automatically.
+
+**Backtest the ruleset** with `pinescript/prop_challenge_strategy.pine` — it
+enforces the same profit target, daily loss, trailing drawdown (intraday/EOD)
+and flat-by-5pm rules inside TradingView's Strategy Tester, with a live status
+table showing peak equity, the trail floor and your remaining buffer.
+
+---
+
+## 5. Tests
 
 ```bash
-python tests/test_trend.py      # or: pytest tests/
+python tests/test_trend.py           # market-structure engine
+python tests/test_risk.py            # challenge guard (target, DD, session, sizing)
+python tests/test_strategy_guard.py  # guard gates the strategy runner
+# or, if installed:  pytest tests/
 ```
 
 ---

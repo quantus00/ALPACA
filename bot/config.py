@@ -71,6 +71,19 @@ class Config:
     option_dte: int = int(os.getenv("BOT_OPTION_DTE", "0"))          # target days-to-expiry
     option_delta_target: float = float(os.getenv("BOT_OPTION_DELTA", "0.40"))
 
+    # ---- Prop-firm challenge guard (trailing-drawdown evaluation) ------------
+    # When enabled, every entry is gated by bot.risk.ChallengeGuard so the bot
+    # respects the profit target, daily loss cap, trailing drawdown, and the
+    # flat-by-5pm / no-overnight session rules of a funded-account challenge.
+    challenge_enabled: bool = _env_bool("BOT_CHALLENGE_ENABLED", False)
+    challenge_start_balance: float = float(os.getenv("BOT_CHALLENGE_START", "50000"))
+    challenge_profit_target: float = float(os.getenv("BOT_CHALLENGE_TARGET", "1500"))
+    challenge_daily_loss: float = float(os.getenv("BOT_CHALLENGE_DAILY_LOSS", "500"))
+    challenge_trailing_dd: float = float(os.getenv("BOT_CHALLENGE_TRAILING_DD", "1000"))
+    # "intraday" (high-water mark on equity) or "eod" (trails on closing balance).
+    challenge_trailing_mode: str = os.getenv("BOT_CHALLENGE_TRAILING_MODE", "intraday")
+    challenge_stop_points: float = float(os.getenv("BOT_CHALLENGE_STOP_POINTS", "5"))
+
     # ---- Runtime knobs -------------------------------------------------------
     dry_run: bool = _env_bool("BOT_DRY_RUN", True)
     webhook_host: str = os.getenv("BOT_WEBHOOK_HOST", "0.0.0.0")
@@ -87,6 +100,18 @@ class Config:
 
     def symbol(self) -> str:
         return INSTRUMENT_SYMBOLS[self.instrument]
+
+    def build_challenge_params(self):
+        """Construct :class:`bot.risk.ChallengeParams` from these toggles."""
+        from .risk import ChallengeParams
+
+        return ChallengeParams(
+            starting_balance=self.challenge_start_balance,
+            profit_target=self.challenge_profit_target,
+            daily_loss_limit=self.challenge_daily_loss,
+            trailing_drawdown=self.challenge_trailing_dd,
+            trailing_mode=self.challenge_trailing_mode,
+        )
 
     def validate(self) -> None:
         allowed = INSTRUMENT_BROKERS[self.instrument]
