@@ -67,7 +67,13 @@ def _make_client(api_key: Optional[str] = None, api_secret: Optional[str] = None
     if key and secret:
         return RESTClient(api_key=key, api_secret=secret)
     if key_file:
-        return RESTClient(key_file=key_file)
+        if not os.path.exists(os.path.expanduser(key_file)):
+            raise RuntimeError(
+                f"COINBASE_KEY_FILE points to {key_file!r} but that file does not "
+                "exist. Download your CDP API key JSON from portal.cdp.coinbase.com "
+                "(API keys -> Create) and save it at that path (chmod 600)."
+            )
+        return RESTClient(key_file=os.path.expanduser(key_file))
     raise RuntimeError(
         "Coinbase credentials missing: set COINBASE_KEY_FILE to your CDP key "
         "JSON, or COINBASE_API_KEY + COINBASE_API_SECRET."
