@@ -116,6 +116,22 @@ class CoinbaseBroker(Broker):
         fn = self.client.market_order_buy if order.side is Side.BUY else self.client.market_order_sell
         return fn(client_order_id=cid, product_id=order.symbol, base_size=size)
 
+    def place_bracket(self, order: Order) -> dict:
+        """Native OCO bracket: entry + take-profit (limit) + stop-loss (trigger)."""
+        if order.take_profit is None or order.stop_price is None:
+            return self.place_order(order)
+        cid = order.client_id or str(uuid.uuid4())
+        if not self.live:
+            log.warning("[coinbase:spot dry] BRACKET %s %s size=%.8f tp=%s stop=%s (not sent)",
+                        order.side.value, order.symbol, order.qty,
+                        order.take_profit, order.stop_price)
+            return {"status": "dry_run", "bracket": True}
+        fn = (self.client.trigger_bracket_order_gtc_buy if order.side is Side.BUY
+              else self.client.trigger_bracket_order_gtc_sell)
+        return fn(client_order_id=cid, product_id=order.symbol, base_size=f"{order.qty:.8f}",
+                  limit_price=_fmt_price(order.take_profit),
+                  stop_trigger_price=_fmt_price(order.stop_price))
+
     def get_positions(self) -> List[dict]:
         out = []
         for a in _attr(self.client.get_accounts(), "accounts", default=[]):
@@ -171,12 +187,35 @@ class CoinbaseDerivativesBroker(Broker):
                         self.venue, order.side.value, order.symbol, contracts, self.leverage)
             return {"status": "dry_run", "venue": self.venue, "contracts": contracts}
         fn = self.client.market_order_buy if order.side is Side.BUY else self.client.market_order_sell
-        kwargs = dict(client_order_id=cid, product_id=order.symbol, base_size=str(contracts))
+        return fn(**self._order_kwargs(cid, order.symbol, str(contracts)))
+
+    def place_bracket(self, order: Order) -> dict:
+        """Native OCO bracket for futures/perps (contracts), with leverage/margin."""
+        if order.take_profit is None or order.stop_price is None:
+            return self.place_order(order)
+        cid = order.client_id or str(uuid.uuid4())
+        contracts = int(order.qty)
+        if contracts < 1:
+            return {"status": "skipped", "reason": "size < 1 contract"}
+        if not self.live:
+            log.warning("[coinbase:%s dry] BRACKET %s %s contracts=%d tp=%s stop=%s lev=%s (not sent)",
+                        self.venue, order.side.value, order.symbol, contracts,
+                        order.take_profit, order.stop_price, self.leverage)
+            return {"status": "dry_run", "bracket": True, "venue": self.venue, "contracts": contracts}
+        fn = (self.client.trigger_bracket_order_gtc_buy if order.side is Side.BUY
+              else self.client.trigger_bracket_order_gtc_sell)
+        kwargs = self._order_kwargs(cid, order.symbol, str(contracts))
+        kwargs["limit_price"] = _fmt_price(order.take_profit)
+        kwargs["stop_trigger_price"] = _fmt_price(order.stop_price)
+        return fn(**kwargs)
+
+    def _order_kwargs(self, cid: str, product_id: str, base_size: str) -> dict:
+        kwargs = dict(client_order_id=cid, product_id=product_id, base_size=base_size)
         if self.leverage:
             kwargs["leverage"] = str(self.leverage)
         if self.margin_type:
             kwargs["margin_type"] = self.margin_type
-        return fn(**kwargs)
+        return kwargs
 
     def get_positions(self) -> List[dict]:
         if self.venue == "futures":
@@ -195,3 +234,10 @@ class CoinbaseDerivativesBroker(Broker):
 
 def _v(obj, *names, default=None):
     return _attr(obj, *names, default=default)
+
+
+def _fmt_price(p: float) -> str:
+    """Format a price to a reasonable precision. Coinbase enforces per-product
+    tick sizes; if a product needs different rounding, adjust here."""
+    p = float(p)
+    return f"{p:.2f}" if abs(p) >= 100 else f"{p:.6f}"

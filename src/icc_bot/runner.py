@@ -113,7 +113,7 @@ def run_cycle(cfg: BotConfig, broker: Broker, risk: RiskManager,
             continue
 
         order = _signal_to_order(sig, qty)
-        result = broker.place_order(order)
+        result = broker.place_bracket(order)   # entry + on-venue stop & target
         risk.register_open()
         actions.append({
             "symbol": symbol, "status": "ordered", "direction": sig.direction.value,

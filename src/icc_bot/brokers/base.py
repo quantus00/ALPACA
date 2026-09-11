@@ -31,6 +31,18 @@ class Broker(ABC):
     def place_order(self, order: Order) -> dict:
         """Submit an order. Implementations must honor dry-run by not sending."""
 
+    def place_bracket(self, order: Order) -> dict:
+        """Submit entry + on-venue stop-loss and take-profit as one bracket.
+
+        Default fallback: venues without native brackets place the entry only and
+        loudly warn that exits are NOT enforced on the exchange. Override where a
+        native bracket/OCO exists (Coinbase does).
+        """
+        log.warning("%s has no native bracket; placing ENTRY ONLY — stop/target "
+                    "are NOT enforced on-venue (stop=%s target=%s)",
+                    self.name, order.stop_price, order.take_profit)
+        return self.place_order(order)
+
     @abstractmethod
     def get_positions(self) -> List[dict]: ...
 
@@ -63,6 +75,13 @@ class DryRunBroker(Broker):
                     order.side.value, order.symbol, order.qty, order.type,
                     order.stop_price, order.take_profit)
         return {"status": "dry_run", "order": order.__dict__}
+
+    def place_bracket(self, order: Order) -> dict:
+        self.placed.append(order)
+        log.warning("[DRY-RUN] would place BRACKET: %s %s qty=%.6f entry=mkt "
+                    "stop=%s target=%s", order.side.value, order.symbol, order.qty,
+                    order.stop_price, order.take_profit)
+        return {"status": "dry_run", "bracket": True, "order": order.__dict__}
 
     def get_positions(self) -> List[dict]:
         return self._data.get_positions() if self._data else []

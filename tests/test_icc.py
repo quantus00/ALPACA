@@ -137,6 +137,9 @@ def test_run_cycle_places_order_on_signal():
     actions = run_cycle(cfg, broker, rm, now=datetime(2026, 1, 1, 14, tzinfo=timezone.utc))
     assert any(a["status"] == "ordered" for a in actions)
     assert len(broker.orders) == 1
+    # the order carries stop & target so a bracket can enforce exits on-venue
+    placed = broker.orders[0]
+    assert placed.stop_price is not None and placed.take_profit is not None
 
 
 def test_run_cycle_skips_out_of_session():
@@ -172,3 +175,12 @@ def test_dry_run_broker_never_sends():
     from icc_bot.models import Order, Side
     res = b.place_order(Order(symbol="BTC-USD", side=Side.BUY, qty=1.0))
     assert res["status"] == "dry_run" and len(b.placed) == 1
+
+
+def test_dry_run_broker_bracket_records_exits():
+    b = DryRunBroker(equity=5_000)
+    from icc_bot.models import Order, Side
+    res = b.place_bracket(Order(symbol="BTC-USD", side=Side.BUY, qty=1.0,
+                                stop_price=95.0, take_profit=115.0))
+    assert res["status"] == "dry_run" and res["bracket"] is True
+    assert b.placed[0].stop_price == 95.0 and b.placed[0].take_profit == 115.0

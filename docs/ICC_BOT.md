@@ -138,8 +138,10 @@ These track his instruments but are **not identical** (hours, spreads, gaps diff
 ## Limitations
 
 - Deterministic pivots won't always agree with a human's eye for swings.
-- No native bracket orders yet — stop/target are computed and logged; wire them to
-  the broker's bracket endpoints (Coinbase `trigger_bracket_order_*`) before live.
+- On-venue exits: Coinbase entries use a **native OCO bracket**
+  (`trigger_bracket_order_gtc_*`) so the stop-loss and take-profit are enforced by
+  the exchange even if the bot goes offline. Webull has no native bracket here yet,
+  so it places the entry only and warns (wire OTOCO before live).
 - Coinbase has no paper sandbox; Webull login/MFA is fragile and version-specific.
 - Timeframes are limited to what each venue's API exposes (e.g., no 4h on Coinbase).
 - Not backtested (the course discourages it); validate forward on paper instead.
