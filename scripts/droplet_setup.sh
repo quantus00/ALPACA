@@ -13,11 +13,25 @@ sudo apt-get install -y python3-venv git >/dev/null 2>&1 || true
 
 echo "==> Fetching $REPO ($BRANCH) into $DIR"
 if [ -d "$DIR/.git" ]; then
-  git -C "$DIR" fetch origin "$BRANCH" && git -C "$DIR" checkout "$BRANCH" && git -C "$DIR" pull --ff-only origin "$BRANCH"
+  # Existing clone: point at the right remote/branch and update.
+  cd "$DIR"
+  git remote set-url origin "$REPO" 2>/dev/null || git remote add origin "$REPO"
+  git fetch origin "$BRANCH"
+  git checkout -B "$BRANCH" "origin/$BRANCH"
+elif [ -d "$DIR" ] && [ -n "$(ls -A "$DIR" 2>/dev/null)" ]; then
+  # Directory exists and is non-empty but NOT a git repo (e.g. a leftover with a
+  # .venv). Overlay the repo onto it via checkout -f; untracked files like .venv
+  # are kept (they're gitignored).
+  echo "    ($DIR exists and is not a git repo — overlaying the repo onto it)"
+  cd "$DIR"
+  git init -q
+  git remote add origin "$REPO" 2>/dev/null || git remote set-url origin "$REPO"
+  git fetch origin "$BRANCH"
+  git checkout -f -B "$BRANCH" "origin/$BRANCH"
 else
   git clone -b "$BRANCH" "$REPO" "$DIR"
+  cd "$DIR"
 fi
-cd "$DIR"
 
 echo "==> Creating venv + installing (with Coinbase SDK)"
 python3 -m venv .venv
