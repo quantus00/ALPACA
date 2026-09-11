@@ -170,6 +170,27 @@ def test_size_for_order_below_one_contract_is_zero():
     assert size_for_order(cfg, "BTC-PERP", 0.4) == 0.0
 
 
+def test_discover_parse_expiry_and_front_month():
+    from datetime import datetime, timezone
+    from icc_bot.discover import parse_expiry, perp_multiplier, pick_front_month
+
+    assert parse_expiry("GOL-25NOV26-CDE") == datetime(2026, 11, 25, tzinfo=timezone.utc)
+    assert parse_expiry("BTC-PERP") is None
+
+    now = datetime(2026, 9, 11, tzinfo=timezone.utc)
+    products = [
+        {"product_id": "GOL-25OCT26-CDE", "future_product_details": {"contract_size": "1"}},
+        {"product_id": "GOL-25NOV26-CDE", "future_product_details": {"contract_size": "1"}},
+        {"product_id": "GOL-25AUG26-CDE", "future_product_details": {"contract_size": "1"}},  # expired
+        {"product_id": "BIT-28NOV26-CDE", "future_product_details": {"contract_size": "0.01"}},
+    ]
+    front = pick_front_month(products, "GOL", now=now)
+    assert front["product_id"] == "GOL-25OCT26-CDE"      # nearest not-yet-expired
+    assert pick_front_month(products, "NOL", now=now) is None
+    assert perp_multiplier("BTC-PERP") == 1.0
+    assert perp_multiplier("1000SHIB-PERP") == 1000.0
+
+
 def test_dry_run_broker_never_sends():
     b = DryRunBroker(equity=5_000)
     from icc_bot.models import Order, Side

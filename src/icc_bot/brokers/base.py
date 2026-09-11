@@ -43,6 +43,11 @@ class Broker(ABC):
                     self.name, order.stop_price, order.take_profit)
         return self.place_order(order)
 
+    def contract_multiplier(self, symbol: str) -> float:
+        """Underlying units per contract (1.0 for spot/equities). Derivatives
+        adapters override to resolve this from the product's contract_size."""
+        return 1.0
+
     @abstractmethod
     def get_positions(self) -> List[dict]: ...
 

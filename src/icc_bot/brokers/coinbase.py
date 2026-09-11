@@ -54,16 +54,24 @@ def _attr(obj, *names, default=None):
     return default
 
 
-def _make_client(api_key: Optional[str], api_secret: Optional[str]):
+def _make_client(api_key: Optional[str] = None, api_secret: Optional[str] = None):
+    """Build a RESTClient from a CDP key file or inline key/secret.
+
+    Precedence: explicit args > COINBASE_KEY_FILE (a downloaded CDP key JSON) >
+    COINBASE_API_KEY / COINBASE_API_SECRET.
+    """
     from coinbase.rest import RESTClient
     key = api_key or os.environ.get("COINBASE_API_KEY")
     secret = api_secret or os.environ.get("COINBASE_API_SECRET")
-    if not key or not secret:
-        raise RuntimeError(
-            "Coinbase credentials missing: set COINBASE_API_KEY and "
-            "COINBASE_API_SECRET (Coinbase Developer Platform API key)."
-        )
-    return RESTClient(api_key=key, api_secret=secret)
+    key_file = os.environ.get("COINBASE_KEY_FILE")
+    if key and secret:
+        return RESTClient(api_key=key, api_secret=secret)
+    if key_file:
+        return RESTClient(key_file=key_file)
+    raise RuntimeError(
+        "Coinbase credentials missing: set COINBASE_KEY_FILE to your CDP key "
+        "JSON, or COINBASE_API_KEY + COINBASE_API_SECRET."
+    )
 
 
 def fetch_bars(client, symbol: str, timeframe: str, limit: int = 300) -> List[Bar]:
@@ -157,10 +165,52 @@ class CoinbaseDerivativesBroker(Broker):
         self.leverage = leverage
         self.margin_type = margin_type
         self.portfolio_uuid = portfolio_uuid or os.environ.get("COINBASE_PORTFOLIO_UUID")
-        if venue == "perp" and not self.portfolio_uuid:
-            raise RuntimeError("perp venue requires a perpetuals portfolio_uuid "
-                               "(set COINBASE_PORTFOLIO_UUID).")
         self.client = _make_client(api_key, api_secret)
+        self._resolve_cache: dict = {}   # symbol -> (product_id, contract_size, day)
+        if venue == "perp" and not self.portfolio_uuid:
+            # Auto-discover the INTX portfolio; fail clearly if perps aren't enabled.
+            from ..discover import intx_portfolio_uuid
+            self.portfolio_uuid = intx_portfolio_uuid(self.client)
+            if not self.portfolio_uuid:
+                raise RuntimeError(
+                    "perp venue needs a perpetuals portfolio_uuid and none was found "
+                    "(INTX not enabled?). Set COINBASE_PORTFOLIO_UUID or use futures.")
+
+    def _resolve(self, symbol: str) -> tuple:
+        """Map a config symbol to a live (product_id, contract_size).
+
+        Accepts a full product id (BIT-28NOV25-CDE, BTC-PERP) or a bare root
+        (BIT, GOL, NOL) which is resolved to the current front-month contract.
+        Cached per day so monthly rolls pick up automatically.
+        """
+        from datetime import datetime, timezone
+        from ..discover import list_futures, perp_multiplier, pick_front_month
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        cached = self._resolve_cache.get(symbol)
+        if cached and cached[2] == today:
+            return cached[0], cached[1]
+
+        up = symbol.upper()
+        if self.venue == "perp" or up.endswith("PERP") or "-PERP" in up:
+            pid, size = symbol, perp_multiplier(symbol)
+        elif "-" in symbol:                       # explicit dated future id
+            pid, size = symbol, self._future_size(symbol)
+        else:                                     # bare root -> front month
+            info = pick_front_month(list_futures(self.client), symbol)
+            if not info:
+                raise RuntimeError(f"no live futures contract found for root {symbol!r}")
+            pid = info["product_id"]
+            size = float(info["contract_size"] or 1.0)
+        self._resolve_cache[symbol] = (pid, size, today)
+        return pid, size
+
+    def _future_size(self, product_id: str) -> float:
+        d = _attr(self.client.get_product(product_id), "future_product_details", default={}) or {}
+        return float(_attr(d, "contract_size") or 1.0)
+
+    def contract_multiplier(self, symbol: str) -> float:
+        return self._resolve(symbol)[1]
 
     def get_account(self) -> Account:
         if self.venue == "futures":
@@ -175,19 +225,23 @@ class CoinbaseDerivativesBroker(Broker):
         return Account(equity=eq, cash=eq, buying_power=eq)
 
     def get_bars(self, symbol, timeframe, limit=300):
-        return fetch_bars(self.client, symbol, timeframe, limit)
+        product_id, _ = self._resolve(symbol)
+        return fetch_bars(self.client, product_id, timeframe, limit)
 
     def place_order(self, order: Order) -> dict:
         cid = order.client_id or str(uuid.uuid4())
         contracts = int(order.qty)
         if contracts < 1:
             return {"status": "skipped", "reason": "size < 1 contract"}
+        product_id, _ = self._resolve(order.symbol)
         if not self.live:
-            log.warning("[coinbase:%s dry] %s %s contracts=%d lev=%s (not sent)",
-                        self.venue, order.side.value, order.symbol, contracts, self.leverage)
-            return {"status": "dry_run", "venue": self.venue, "contracts": contracts}
+            log.warning("[coinbase:%s dry] %s %s (%s) contracts=%d lev=%s (not sent)",
+                        self.venue, order.side.value, order.symbol, product_id,
+                        contracts, self.leverage)
+            return {"status": "dry_run", "venue": self.venue, "product_id": product_id,
+                    "contracts": contracts}
         fn = self.client.market_order_buy if order.side is Side.BUY else self.client.market_order_sell
-        return fn(**self._order_kwargs(cid, order.symbol, str(contracts)))
+        return fn(**self._order_kwargs(cid, product_id, str(contracts)))
 
     def place_bracket(self, order: Order) -> dict:
         """Native OCO bracket for futures/perps (contracts), with leverage/margin."""
@@ -197,14 +251,16 @@ class CoinbaseDerivativesBroker(Broker):
         contracts = int(order.qty)
         if contracts < 1:
             return {"status": "skipped", "reason": "size < 1 contract"}
+        product_id, _ = self._resolve(order.symbol)
         if not self.live:
-            log.warning("[coinbase:%s dry] BRACKET %s %s contracts=%d tp=%s stop=%s lev=%s (not sent)",
-                        self.venue, order.side.value, order.symbol, contracts,
+            log.warning("[coinbase:%s dry] BRACKET %s %s (%s) contracts=%d tp=%s stop=%s lev=%s (not sent)",
+                        self.venue, order.side.value, order.symbol, product_id, contracts,
                         order.take_profit, order.stop_price, self.leverage)
-            return {"status": "dry_run", "bracket": True, "venue": self.venue, "contracts": contracts}
+            return {"status": "dry_run", "bracket": True, "venue": self.venue,
+                    "product_id": product_id, "contracts": contracts}
         fn = (self.client.trigger_bracket_order_gtc_buy if order.side is Side.BUY
               else self.client.trigger_bracket_order_gtc_sell)
-        kwargs = self._order_kwargs(cid, order.symbol, str(contracts))
+        kwargs = self._order_kwargs(cid, product_id, str(contracts))
         kwargs["limit_price"] = _fmt_price(order.take_profit)
         kwargs["stop_trigger_price"] = _fmt_price(order.stop_price)
         return fn(**kwargs)

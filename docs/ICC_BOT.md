@@ -35,22 +35,34 @@ Set `ICC_VENUE`:
 | `futures` | Coinbase Financial Markets US futures (dated + nano) | **whole contracts** | balances via futures endpoints |
 | `perp` | Coinbase International (INTX) perpetuals | **whole contracts** | needs `COINBASE_PORTFOLIO_UUID` |
 
-Because contracts are integers, each derivative product needs an
-**underlying-per-contract multiplier** so risk-based sizing can convert your
-dollar risk into a whole number of contracts:
+### IDs roll monthly — so don't hardcode them
 
+Expiring futures change IDs every month (`ROOT-DDMMMYY-CDE`). Two ways to feed
+the bot, both avoiding stale IDs:
+
+1. **Bare roots (recommended)** — pass a root and the bot resolves the current
+   **front-month** contract each day and reads its `contract_size` from the API:
+   ```bash
+   ICC_BROKER=coinbase ICC_VENUE=futures ICC_SYMBOLS=BIT,GOL ICC_MODE=dry_run icc-bot
+   ```
+   Roots: `BIT` nano BTC, `BIP` nano-BTC perp-style, `GOL` gold, `NOL` oil.
+2. **Explicit product IDs** — pass full IDs and (optionally) pin multipliers:
+   ```bash
+   ICC_VENUE=perp ICC_SYMBOLS=BTC-PERP COINBASE_PORTFOLIO_UUID=... \
+   ICC_CONTRACT_SPECS=BTC-PERP=1.0 ICC_LEVERAGE=2 ICC_MODE=dry_run icc-bot
+   ```
+
+Discover live products, contract sizes, and your INTX `portfolio_uuid`:
 ```bash
-ICC_BROKER=coinbase ICC_VENUE=perp \
-ICC_SYMBOLS=BTC-PERP-INTX \
-ICC_CONTRACT_SPECS=BTC-PERP-INTX=0.01 \
-ICC_LEVERAGE=2 COINBASE_PORTFOLIO_UUID=... \
-ICC_MODE=dry_run icc-bot
+icc-discover          # prints PORTFOLIOS + FUTURES tables
 ```
+Confirmed multipliers: gold `GOL` = 1 troy oz, oil `NOL` = 10 barrels, nano BTC
+`BIT` = 0.01 BTC, INTX perps = 1 (except `1000XXX-PERP` = 1000). If no INTX
+portfolio appears, perps aren't enabled on your account (US retail gets the
+`BIP` perp-style futures instead) — the bot says so rather than guessing.
 
-**You must supply the real product IDs and multipliers** — this bot does not
-hardcode them, and cannot verify from its build environment that a given product
-(e.g. a Nov-expiry BTC future, or a **gold** future) exists on your account or is
-enabled. If Coinbase doesn't list it, the venue rejects the order.
+Credentials: point `COINBASE_KEY_FILE` at your CDP key JSON (or set
+`COINBASE_API_KEY` + `COINBASE_API_SECRET`).
 
 ⚠️ **Leverage magnifies losses.** Sizing is still by stop-distance (correct and
 venue-agnostic), and the notional cap acts as a leverage guard — but a wrong

@@ -105,6 +105,18 @@ def run_cycle(cfg: BotConfig, broker: Broker, risk: RiskManager,
             actions.append({"symbol": symbol, "status": "blocked", "reason": why})
             continue
 
+        # Derivatives: resolve the per-contract multiplier from the venue if the
+        # config didn't pin one (so monthly-rolled contracts self-configure).
+        if cfg.is_derivatives and symbol not in cfg.contract_specs:
+            try:
+                m = broker.contract_multiplier(symbol)
+                if m and m > 0:
+                    cfg.contract_specs[symbol] = m
+            except Exception as exc:
+                actions.append({"symbol": symbol, "status": "error",
+                                "reason": f"contract resolve failed: {exc}"})
+                continue
+
         risk_units = risk.position_size(account, sig)
         qty = size_for_order(cfg, symbol, risk_units)
         if qty <= 0:
