@@ -6,6 +6,7 @@ pure enough to unit-test with a fake broker. `run_forever` polls it.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -25,8 +26,14 @@ def build_broker(cfg: BotConfig) -> Broker:
     real: Optional[Broker] = None
 
     if cfg.broker == "coinbase":
-        from .brokers.coinbase import CoinbaseBroker
-        real = CoinbaseBroker(live=want_live)
+        if cfg.venue in ("futures", "perp"):
+            from .brokers.coinbase import CoinbaseDerivativesBroker
+            real = CoinbaseDerivativesBroker(
+                venue=cfg.venue, live=want_live, portfolio_uuid=cfg.portfolio_uuid or None,
+                leverage=cfg.leverage or None, margin_type=cfg.margin_type)
+        else:
+            from .brokers.coinbase import CoinbaseBroker
+            real = CoinbaseBroker(live=want_live)
     elif cfg.broker == "webull":
         from .brokers.webull import WebullBroker
         real = WebullBroker(live=want_live)
@@ -47,6 +54,20 @@ def in_session(cfg: BotConfig, now: Optional[datetime] = None) -> bool:
         return True
     now = now or datetime.now(timezone.utc)
     return cfg.session_start_utc <= now.hour < cfg.session_end_utc
+
+
+def size_for_order(cfg: BotConfig, symbol: str, risk_units: float) -> float:
+    """Convert risk-based underlying units into the order size for the venue.
+
+    Spot: order size = underlying units. Derivatives: whole contracts =
+    floor(units / contract_multiplier); returns 0 if it rounds below 1 contract.
+    """
+    if not cfg.is_derivatives:
+        return risk_units
+    mult = cfg.multiplier_for(symbol)
+    if mult <= 0:
+        return 0.0
+    return float(math.floor(risk_units / mult))
 
 
 def _signal_to_order(sig: Signal, qty: float) -> Order:
@@ -84,9 +105,11 @@ def run_cycle(cfg: BotConfig, broker: Broker, risk: RiskManager,
             actions.append({"symbol": symbol, "status": "blocked", "reason": why})
             continue
 
-        qty = risk.position_size(account, sig)
+        risk_units = risk.position_size(account, sig)
+        qty = size_for_order(cfg, symbol, risk_units)
         if qty <= 0:
-            actions.append({"symbol": symbol, "status": "zero_size"})
+            actions.append({"symbol": symbol, "status": "zero_size",
+                            "reason": "below 1 contract" if cfg.is_derivatives else "no size"})
             continue
 
         order = _signal_to_order(sig, qty)

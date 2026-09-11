@@ -13,7 +13,7 @@ from icc_bot.brokers.base import Broker, DryRunBroker
 from icc_bot.config import BotConfig
 from icc_bot.models import Account, Bar, Direction, Mode
 from icc_bot.risk import RiskLimits, RiskManager
-from icc_bot.runner import run_cycle
+from icc_bot.runner import run_cycle, size_for_order
 from icc_bot.strategy import ICCParams, evaluate
 from icc_bot.structure import classify_trend, find_swings
 
@@ -147,6 +147,24 @@ def test_run_cycle_skips_out_of_session():
     actions = run_cycle(cfg, broker, rm, now=datetime(2026, 1, 1, 3, tzinfo=timezone.utc))
     assert actions == [{"status": "skip", "reason": "out of session"}]
     assert broker.orders == []
+
+
+def test_size_for_order_spot_is_units():
+    cfg = BotConfig(broker="coinbase", venue="spot")
+    assert size_for_order(cfg, "BTC-USD", 0.375) == 0.375
+
+
+def test_size_for_order_derivatives_floors_to_contracts():
+    # nano-style multiplier 0.01 BTC/contract: 0.375 BTC -> 37 contracts
+    cfg = BotConfig(broker="coinbase", venue="futures",
+                    contract_specs={"BTC-NOV-FUT": 0.01})
+    assert size_for_order(cfg, "BTC-NOV-FUT", 0.375) == 37.0
+
+
+def test_size_for_order_below_one_contract_is_zero():
+    cfg = BotConfig(broker="coinbase", venue="perp",
+                    contract_specs={"BTC-PERP": 1.0})
+    assert size_for_order(cfg, "BTC-PERP", 0.4) == 0.0
 
 
 def test_dry_run_broker_never_sends():

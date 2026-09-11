@@ -25,6 +25,37 @@ or **Coinbase** (crypto) through a shared strategy engine.
 
 Full rationale is in each module's docstring: `strategy.py`, `structure.py`, `risk.py`.
 
+## Coinbase derivatives (futures + perps)
+
+Set `ICC_VENUE`:
+
+| Venue | What | Sizing | Notes |
+|---|---|---|---|
+| `spot` | Advanced Trade spot | base units | no paper sandbox |
+| `futures` | Coinbase Financial Markets US futures (dated + nano) | **whole contracts** | balances via futures endpoints |
+| `perp` | Coinbase International (INTX) perpetuals | **whole contracts** | needs `COINBASE_PORTFOLIO_UUID` |
+
+Because contracts are integers, each derivative product needs an
+**underlying-per-contract multiplier** so risk-based sizing can convert your
+dollar risk into a whole number of contracts:
+
+```bash
+ICC_BROKER=coinbase ICC_VENUE=perp \
+ICC_SYMBOLS=BTC-PERP-INTX \
+ICC_CONTRACT_SPECS=BTC-PERP-INTX=0.01 \
+ICC_LEVERAGE=2 COINBASE_PORTFOLIO_UUID=... \
+ICC_MODE=dry_run icc-bot
+```
+
+**You must supply the real product IDs and multipliers** — this bot does not
+hardcode them, and cannot verify from its build environment that a given product
+(e.g. a Nov-expiry BTC future, or a **gold** future) exists on your account or is
+enabled. If Coinbase doesn't list it, the venue rejects the order.
+
+⚠️ **Leverage magnifies losses.** Sizing is still by stop-distance (correct and
+venue-agnostic), and the notional cap acts as a leverage guard — but a wrong
+multiplier means a wrong position size. Verify sizes in dry-run first.
+
 ## Safety model (three modes)
 
 - **`dry_run`** (default) — fetches live data, computes signals, **places nothing**. Start here.
