@@ -1,0 +1,14 @@
+[Unit]
+Description=Start the SPY 0DTE bot on weekday mornings
+
+[Timer]
+# REQUIRES the droplet clock to be America/New_York:
+#   sudo timedatectl set-timezone America/New_York
+# Fires at 10:25 ET; the bot sleeps until its own --entry time (10:34 ET).
+OnCalendar=Mon..Fri 10:25
+# Don't fire a "missed" run if the droplet was off past the window.
+Persistent=false
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

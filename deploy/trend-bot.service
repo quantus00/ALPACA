@@ -1,0 +1,28 @@
+[Unit]
+Description=Multi-timeframe trend bot (webhook + dashboard)
+Documentation=https://github.com/quantus00/ALPACA
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/opt/alpaca
+EnvironmentFile=/etc/alpaca/alpaca.env
+ExecStart=/opt/alpaca/.venv/bin/python -m bot.main webhook
+Restart=on-failure
+RestartSec=10
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=/opt/alpaca
+
+[Install]
+WantedBy=multi-user.target

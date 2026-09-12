@@ -1,0 +1,24 @@
+{
+  // VS Code "Run and Debug" configs for the Webull crypto paper trader.
+  // Press F5 (or the green Run arrow) and pick one of these.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Webull paper trade (interactive)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/webull_crypto_paper_trade.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Webull paper trade (BTC $100, dry-run)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/webull_crypto_paper_trade.py",
+      "args": ["--crypto", "BTC", "--amount", "100", "--dry-run"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
