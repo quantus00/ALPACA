@@ -96,7 +96,9 @@ def run_cycle(cfg: BotConfig, broker: Broker, risk: RiskManager,
         ltf = broker.get_bars(symbol, cfg.ltf, limit=300)
         sig = evaluate(symbol, htf, ltf, cfg.params)
         if sig is None:
-            actions.append({"symbol": symbol, "status": "no_signal"})
+            actions.append({"symbol": symbol, "status": "no_signal",
+                            "price": (ltf[-1].close if ltf else None),
+                            "bars": f"{len(htf)}/{len(ltf)}"})
             continue
 
         account = broker.get_account()
@@ -147,9 +149,20 @@ def run_forever(cfg: Optional[BotConfig] = None) -> None:
              broker.name, cfg.mode.value, cfg.symbols, cfg.htf, cfg.ltf)
     while True:
         try:
-            for a in run_cycle(cfg, broker, risk):
+            actions = run_cycle(cfg, broker, risk)
+            # One-line heartbeat every cycle so it's visibly alive; quiet cycles
+            # (no ICC setup) are normal and expected most of the time.
+            log.info("cycle: %s", " | ".join(_fmt_action(a) for a in actions) or "(idle)")
+            for a in actions:
                 if a.get("status") not in ("no_signal", "skip"):
-                    log.info("action: %s", a)
+                    log.info("  -> %s", a)
         except Exception:  # keep the loop alive; a bad cycle shouldn't kill the bot
             log.exception("cycle error")
         time.sleep(cfg.poll_seconds)
+
+
+def _fmt_action(a: dict) -> str:
+    s = f"{a.get('symbol', a.get('status'))}={a.get('status')}"
+    if a.get("price") is not None:
+        s += f"@{a['price']}"
+    return s
