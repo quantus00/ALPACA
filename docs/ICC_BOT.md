@@ -85,13 +85,45 @@ Credentials: point `COINBASE_KEY_FILE` at your CDP key JSON (or set
 venue-agnostic), and the notional cap acts as a leverage guard — but a wrong
 multiplier means a wrong position size. Verify sizes in dry-run first.
 
+## Three ways to run (separate launchers)
+
+All three share the same ICC engine. From `~/ALPACA` (venv active):
+
+### 1. Backtest — replay history, no keys needed
+```bash
+scripts/backtest.sh --ltf-csv "COINBASE_BTCUSD, 15.csv" --htf-seconds 3600 \
+  --equity 10000 --risk-pct 1 --out trades.csv
+```
+Feed a TradingView/Coinbase candle CSV (your entry timeframe, e.g. 15m). It
+resamples to the structure timeframe, replays bar-by-bar through `evaluate()` +
+the simulator, and prints win rate, avg R, profit factor, return %, max
+drawdown (and writes each trade to `--out`).
+
+### 2. Paper — live data, simulated fills + P&L, no real orders
+```bash
+scripts/run_paper.sh            # loops; add --once for a single cycle
+```
+Keeps a virtual account (`ICC_PAPER_EQUITY`, default 10k). Logs OPEN/CLOSE with
+running equity — a true forward-test with zero risk.
+
+### 3. Live — real orders, real money
+```bash
+ICC_I_UNDERSTAND_LIVE_RISK=yes ICC_RISK_PCT=0.5 scripts/run_live.sh
+```
+Refuses to start unless `ICC_I_UNDERSTAND_LIVE_RISK=yes`. Places native bracket
+orders on Coinbase (stop + target enforced on-venue). For 24/7 use the systemd
+unit above with `ICC_MODE=live` in `/root/icc-bot.env`.
+
+Override any setting via env vars, e.g. `ICC_SYMBOLS=BIT,GOL scripts/run_paper.sh`.
+
 ## Safety model (three modes)
 
-- **`dry_run`** (default) — fetches live data, computes signals, **places nothing**. Start here.
-- **`paper`** — routes orders to the broker's paper account (Webull) — Coinbase has no
-  sandbox, so `paper` behaves as dry-run there.
+- **`dry_run`** (default) — fetches live data, computes signals, logs the order it
+  *would* place, but **places nothing** and keeps no P&L.
+- **`paper`** — live data, **simulated fills + running P&L** via the built-in
+  simulator (Coinbase has no real sandbox, so this is how you forward-test).
 - **`live`** — real orders with real money. Requires **both** `ICC_MODE=live` **and**
-  `ICC_I_UNDERSTAND_LIVE_RISK=yes`; otherwise it silently falls back to dry-run.
+  `ICC_I_UNDERSTAND_LIVE_RISK=yes`; otherwise it falls back to dry-run.
 
 Hard guardrails enforced every cycle (see `risk.py`): risk-per-trade sizing,
 max daily loss (kill switch), max open positions, max trades/day, notional cap.

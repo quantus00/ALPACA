@@ -27,6 +27,7 @@ class BotConfig:
     portfolio_uuid: str = ""                 # required for perp venue
     leverage: str = ""                       # e.g. "2"; blank = venue default
     margin_type: str = "CROSS"               # CROSS | ISOLATED
+    paper_equity: float = 10_000.0           # starting virtual equity for paper mode
 
     def multiplier_for(self, symbol: str) -> float:
         return float(self.contract_specs.get(symbol, 1.0))
@@ -85,6 +86,7 @@ def load_config() -> BotConfig:
         portfolio_uuid=_env("COINBASE_PORTFOLIO_UUID", ""),
         leverage=_env("ICC_LEVERAGE", ""),
         margin_type=_env("ICC_MARGIN_TYPE", "CROSS"),
+        paper_equity=float(_env("ICC_PAPER_EQUITY", "10000")),
         session_start_utc=int(_env("ICC_SESSION_START_UTC", "13")),
         session_end_utc=int(_env("ICC_SESSION_END_UTC", "16")),
         session_enabled=_env("ICC_SESSION_ENABLED", "true").lower() in _TRUTHY,

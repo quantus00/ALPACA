@@ -21,6 +21,7 @@ webull = ["webull>=0.6"]
 alpaca-mcp = "alpaca_mcp.server:main"
 icc-bot = "icc_bot.runner:main"
 icc-discover = "icc_bot.discover:main"
+icc-backtest = "icc_bot.backtest:main"
 
 [build-system]
 requires = ["hatchling"]

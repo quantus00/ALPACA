@@ -6,7 +6,6 @@ pure enough to unit-test with a fake broker. `run_forever` polls it.
 from __future__ import annotations
 
 import logging
-import math
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -42,6 +41,9 @@ def build_broker(cfg: BotConfig) -> Broker:
 
     if cfg.mode is Mode.DRY_RUN:
         return DryRunBroker(data_source=real)
+    if cfg.mode is Mode.PAPER:
+        from .brokers.paper import PaperBroker
+        return PaperBroker(data_source=real, start_equity=cfg.paper_equity)
     if cfg.mode is Mode.LIVE and not cfg.live_confirmed:
         log.error("LIVE mode requested but ICC_I_UNDERSTAND_LIVE_RISK != 'yes'; "
                   "falling back to DRY-RUN.")
@@ -56,26 +58,15 @@ def in_session(cfg: BotConfig, now: Optional[datetime] = None) -> bool:
     return cfg.session_start_utc <= now.hour < cfg.session_end_utc
 
 
-def size_for_order(cfg: BotConfig, symbol: str, risk_units: float) -> float:
-    """Convert risk-based underlying units into the order size for the venue.
-
-    Spot: order size = underlying units. Derivatives: whole contracts =
-    floor(units / contract_multiplier); returns 0 if it rounds below 1 contract.
-    """
-    if not cfg.is_derivatives:
-        return risk_units
-    mult = cfg.multiplier_for(symbol)
-    if mult <= 0:
-        return 0.0
-    return float(math.floor(risk_units / mult))
-
-
 def _signal_to_order(sig: Signal, qty: float) -> Order:
     side = Side.BUY if sig.direction.value == "long" else Side.SELL
     return Order(
         symbol=sig.symbol, side=side, qty=qty, type="market",
         stop_price=sig.stop, take_profit=sig.target,
-        meta={"reason": sig.reason, "rr": round(sig.rr, 2)},
+        # `entry`/`ts` let the paper broker open a simulated position; the real
+        # derivatives broker converts `qty` (underlying units) into contracts.
+        meta={"reason": sig.reason, "rr": round(sig.rr, 2),
+              "entry": sig.entry, "ts": sig.ts},
     )
 
 
@@ -86,6 +77,10 @@ def run_cycle(cfg: BotConfig, broker: Broker, risk: RiskManager,
     day = now.strftime("%Y-%m-%d")
     if risk.state.day != day:
         risk.start_day(day, broker.get_account().equity)
+
+    # Paper broker: check open simulated positions for stop/target before entering.
+    if hasattr(broker, "on_cycle"):
+        broker.on_cycle()
 
     actions: list[dict] = []
     if not in_session(cfg, now):
@@ -107,23 +102,11 @@ def run_cycle(cfg: BotConfig, broker: Broker, risk: RiskManager,
             actions.append({"symbol": symbol, "status": "blocked", "reason": why})
             continue
 
-        # Derivatives: resolve the per-contract multiplier from the venue if the
-        # config didn't pin one (so monthly-rolled contracts self-configure).
-        if cfg.is_derivatives and symbol not in cfg.contract_specs:
-            try:
-                m = broker.contract_multiplier(symbol)
-                if m and m > 0:
-                    cfg.contract_specs[symbol] = m
-            except Exception as exc:
-                actions.append({"symbol": symbol, "status": "error",
-                                "reason": f"contract resolve failed: {exc}"})
-                continue
-
-        risk_units = risk.position_size(account, sig)
-        qty = size_for_order(cfg, symbol, risk_units)
+        # Size in underlying units from risk %. The derivatives broker converts
+        # this to whole contracts internally; paper/spot use units directly.
+        qty = risk.position_size(account, sig)
         if qty <= 0:
-            actions.append({"symbol": symbol, "status": "zero_size",
-                            "reason": "below 1 contract" if cfg.is_derivatives else "no size"})
+            actions.append({"symbol": symbol, "status": "zero_size", "reason": "no size"})
             continue
 
         order = _signal_to_order(sig, qty)
@@ -157,10 +140,14 @@ def run_once(cfg: Optional[BotConfig] = None) -> list[dict]:
     _configure_logging()
     broker = build_broker(cfg)
     risk = RiskManager(cfg.risk)
+    if hasattr(broker, "set_risk"):
+        broker.set_risk(risk)
     log.info("ICC bot single cycle: broker=%s mode=%s symbols=%s htf=%s ltf=%s",
              broker.name, cfg.mode.value, cfg.symbols, cfg.htf, cfg.ltf)
     actions = run_cycle(cfg, broker, risk)
     _log_cycle(actions)
+    if hasattr(broker, "summary"):
+        log.info("paper summary: %s", broker.summary())
     return actions
 
 
@@ -169,6 +156,8 @@ def run_forever(cfg: Optional[BotConfig] = None) -> None:
     _configure_logging()
     broker = build_broker(cfg)
     risk = RiskManager(cfg.risk)
+    if hasattr(broker, "set_risk"):
+        broker.set_risk(risk)
     log.info("ICC bot starting: broker=%s mode=%s symbols=%s htf=%s ltf=%s",
              broker.name, cfg.mode.value, cfg.symbols, cfg.htf, cfg.ltf)
     while True:

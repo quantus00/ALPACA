@@ -13,7 +13,7 @@ from icc_bot.brokers.base import Broker, DryRunBroker
 from icc_bot.config import BotConfig
 from icc_bot.models import Account, Bar, Direction, Mode
 from icc_bot.risk import RiskLimits, RiskManager
-from icc_bot.runner import run_cycle, size_for_order
+from icc_bot.runner import run_cycle
 from icc_bot.strategy import ICCParams, evaluate
 from icc_bot.structure import classify_trend, find_swings
 
@@ -142,6 +142,21 @@ def test_run_cycle_places_order_on_signal():
     assert placed.stop_price is not None and placed.take_profit is not None
 
 
+def test_paper_broker_opens_simulated_position():
+    from icc_bot.brokers.paper import PaperBroker
+    htf = series([100, 96, 104, 99, 108, 103], seg=4)
+    ltf = series([106, 100, 103, 100.5, 104], seg=3)
+    broker = PaperBroker(data_source=FakeBroker(htf, ltf), start_equity=10_000)
+    cfg = BotConfig(broker="coinbase", venue="spot", mode=Mode.PAPER,
+                    symbols=["BTC-USD"], session_enabled=False)
+    rm = RiskManager(cfg.risk)
+    broker.set_risk(rm)
+    actions = run_cycle(cfg, broker, rm, now=datetime(2026, 1, 1, 14, tzinfo=timezone.utc))
+    assert any(a["status"] == "ordered" for a in actions)
+    assert broker.sim.open_trade is not None
+    assert broker.get_account().equity == pytest.approx(10_000.0)  # unrealized only
+
+
 def test_run_cycle_skips_out_of_session():
     broker = FakeBroker(series([100, 96, 104, 99, 108, 103]), series([106, 100, 103, 100.5, 104], 3))
     cfg = BotConfig(broker="fake", symbols=["BTC-USD"],
@@ -152,22 +167,46 @@ def test_run_cycle_skips_out_of_session():
     assert broker.orders == []
 
 
-def test_size_for_order_spot_is_units():
-    cfg = BotConfig(broker="coinbase", venue="spot")
-    assert size_for_order(cfg, "BTC-USD", 0.375) == 0.375
+def test_units_to_contracts():
+    from icc_bot.brokers.coinbase import units_to_contracts
+    assert units_to_contracts(0.375, 0.01) == 37    # 0.375 BTC / 0.01 per contract
+    assert units_to_contracts(0.4, 1.0) == 0        # below one contract
+    assert units_to_contracts(3.2, 1.0) == 3
+    assert units_to_contracts(5.0, 0.0) == 0        # guard: bad size
 
 
-def test_size_for_order_derivatives_floors_to_contracts():
-    # nano-style multiplier 0.01 BTC/contract: 0.375 BTC -> 37 contracts
-    cfg = BotConfig(broker="coinbase", venue="futures",
-                    contract_specs={"BTC-NOV-FUT": 0.01})
-    assert size_for_order(cfg, "BTC-NOV-FUT", 0.375) == 37.0
+def test_simulator_long_hits_target_then_stops_out():
+    from icc_bot.models import Direction, Signal
+    from icc_bot.sim import Simulator, stats
+
+    sim = Simulator(equity=10_000, risk_per_trade_pct=1.0)
+    # long entry 100, stop 95, target 115 -> risk 5/unit; qty = 100/5 = 20 units
+    sig = Signal(Direction.LONG, "X", entry=100.0, stop=95.0, target=115.0, reason="", ts=1)
+    assert sim.enter(sig) is True
+    assert sim.open_trade.qty == pytest.approx(20.0)
+    # a bar that reaches the target closes the trade for +15*20 = +300
+    sim.update(Bar(ts=2, open=101, high=116, low=100, close=115))
+    assert sim.open_trade is None
+    assert sim.equity == pytest.approx(10_300.0)
+    s = stats(sim)
+    assert s["trades"] == 1 and s["wins"] == 1 and s["return_pct"] == pytest.approx(3.0)
 
 
-def test_size_for_order_below_one_contract_is_zero():
-    cfg = BotConfig(broker="coinbase", venue="perp",
-                    contract_specs={"BTC-PERP": 1.0})
-    assert size_for_order(cfg, "BTC-PERP", 0.4) == 0.0
+def test_backtest_resample_and_run():
+    from icc_bot.backtest import resample, run_backtest
+    from icc_bot.strategy import ICCParams
+
+    # Build a long uptrend of 15-min bars; resample to 1h; just assert it runs.
+    bars = []
+    price = 100.0
+    for i in range(200):
+        price += 0.5 if (i // 10) % 2 == 0 else -0.2  # rising zig-zag
+        bars.append(Bar(ts=i * 900, open=price, high=price + 0.5,
+                        low=price - 0.5, close=price, volume=1.0))
+    htf = resample(bars, 3600)
+    assert 0 < len(htf) < len(bars)
+    sim = run_backtest("X", bars, 3600, ICCParams(), equity=10_000, risk_pct=1.0)
+    assert sim.equity > 0 and isinstance(sim.trades, list)
 
 
 def test_discover_parse_expiry_and_front_month():

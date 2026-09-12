@@ -20,6 +20,7 @@ Derivatives are leveraged; only LIVE places real orders.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import time
 import uuid
@@ -236,10 +237,10 @@ class CoinbaseDerivativesBroker(Broker):
 
     def place_order(self, order: Order) -> dict:
         cid = order.client_id or str(uuid.uuid4())
-        contracts = int(order.qty)
+        product_id, size = self._resolve(order.symbol)
+        contracts = units_to_contracts(order.qty, size)   # order.qty is underlying units
         if contracts < 1:
-            return {"status": "skipped", "reason": "size < 1 contract"}
-        product_id, _ = self._resolve(order.symbol)
+            return {"status": "skipped", "reason": "size < 1 contract", "product_id": product_id}
         if not self.live:
             log.warning("[coinbase:%s dry] %s %s (%s) contracts=%d lev=%s (not sent)",
                         self.venue, order.side.value, order.symbol, product_id,
@@ -254,10 +255,10 @@ class CoinbaseDerivativesBroker(Broker):
         if order.take_profit is None or order.stop_price is None:
             return self.place_order(order)
         cid = order.client_id or str(uuid.uuid4())
-        contracts = int(order.qty)
+        product_id, size = self._resolve(order.symbol)
+        contracts = units_to_contracts(order.qty, size)   # order.qty is underlying units
         if contracts < 1:
-            return {"status": "skipped", "reason": "size < 1 contract"}
-        product_id, _ = self._resolve(order.symbol)
+            return {"status": "skipped", "reason": "size < 1 contract", "product_id": product_id}
         if not self.live:
             log.warning("[coinbase:%s dry] BRACKET %s %s (%s) contracts=%d tp=%s stop=%s lev=%s (not sent)",
                         self.venue, order.side.value, order.symbol, product_id, contracts,
@@ -296,6 +297,13 @@ class CoinbaseDerivativesBroker(Broker):
 
 def _v(obj, *names, default=None):
     return _attr(obj, *names, default=default)
+
+
+def units_to_contracts(units: float, contract_size: float) -> int:
+    """Convert underlying units (from risk sizing) to whole contracts."""
+    if contract_size <= 0:
+        return 0
+    return int(math.floor(units / contract_size))
 
 
 def _money(x, default: float = 0.0) -> float:
