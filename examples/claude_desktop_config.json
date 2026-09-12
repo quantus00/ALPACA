@@ -1,0 +1,13 @@
+{
+  "_comment": "Example Claude Desktop / .mcp.json entry for the Alpaca MCP server. Copy the 'alpaca' block into your real config, set the command to the full path of .venv/bin/alpaca-mcp on your machine, and replace the two key placeholders with your paper keys. Do not commit real keys.",
+  "mcpServers": {
+    "alpaca": {
+      "command": "/absolute/path/to/ALPACA/.venv/bin/alpaca-mcp",
+      "env": {
+        "ALPACA_API_KEY": "PUT_YOUR_PAPER_KEY_HERE",
+        "ALPACA_API_SECRET": "PUT_YOUR_PAPER_SECRET_HERE",
+        "ALPACA_PAPER": "true"
+      }
+    }
+  }
+}
