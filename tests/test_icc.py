@@ -230,6 +230,23 @@ def test_discover_parse_expiry_and_front_month():
     assert perp_multiplier("1000SHIB-PERP") == 1000.0
 
 
+def test_data_timeframe_seconds():
+    from icc_bot.data import timeframe_seconds
+    assert timeframe_seconds("15m") == 900
+    assert timeframe_seconds("1h") == 3600
+    assert timeframe_seconds("1d") == 86400
+    with pytest.raises(ValueError):
+        timeframe_seconds("7m")
+
+
+def test_webapp_builds_and_serves_page():
+    pytest.importorskip("flask")
+    from icc_bot.webapp import create_app
+    client = create_app().test_client()
+    r = client.get("/")
+    assert r.status_code == 200 and b"ICC Backtest Cockpit" in r.data
+
+
 def test_dry_run_broker_never_sends():
     b = DryRunBroker(equity=5_000)
     from icc_bot.models import Order, Side

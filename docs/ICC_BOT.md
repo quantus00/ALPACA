@@ -85,6 +85,25 @@ Credentials: point `COINBASE_KEY_FILE` at your CDP key JSON (or set
 venue-agnostic), and the notional cap acts as a leverage guard — but a wrong
 multiplier means a wrong position size. Verify sizes in dry-run first.
 
+## Web cockpit (backtest in a browser)
+
+A point-and-click UI to toggle asset, timeframes, days of history, risk, and
+R:R — no CLI flags. Fetches candles from Coinbase and shows stats, an equity
+curve, and the trade list.
+
+```bash
+pip install -e '.[web]'
+scripts/run_web.sh                 # serves on port 8787
+```
+Open `http://<droplet-ip>:8787` (or forward the port in VS Code: Ports panel →
+Forward Port → 8787, then click the local URL). Set `ICC_WEB_PORT` to change it.
+Read-only market data — the cockpit never places orders.
+
+The CLI can also fetch instead of using a CSV:
+```bash
+icc-backtest --fetch --symbol ETH-USD --ltf 15m --days 45 --htf-seconds 3600 --out trades.csv
+```
+
 ## Three ways to run (separate launchers)
 
 All three share the same ICC engine. From `~/ALPACA` (venv active):

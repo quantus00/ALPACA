@@ -117,7 +117,11 @@ def _write_trades(path: str, sim: Simulator) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(prog="icc-backtest",
                                  description="Backtest the ICC strategy over a candle CSV.")
-    ap.add_argument("--ltf-csv", required=True, help="entry-timeframe OHLCV CSV")
+    ap.add_argument("--ltf-csv", help="entry-timeframe OHLCV CSV (or use --fetch)")
+    ap.add_argument("--fetch", action="store_true",
+                    help="fetch candles from Coinbase instead of a CSV (needs COINBASE_KEY_FILE)")
+    ap.add_argument("--ltf", default="15m", help="entry timeframe for --fetch (e.g. 15m)")
+    ap.add_argument("--days", type=float, default=30, help="days of history for --fetch")
     ap.add_argument("--htf-seconds", type=int, default=3600,
                     help="structure timeframe in seconds to resample to (default 3600 = 1h)")
     ap.add_argument("--symbol", default="BACKTEST")
@@ -129,9 +133,17 @@ def main() -> None:
     ap.add_argument("--out", help="optional path to write the trade list CSV")
     args = ap.parse_args()
 
-    ltf = load_csv(args.ltf_csv)
+    if args.fetch:
+        from .data import fetch_candles
+        symbol = args.symbol if args.symbol != "BACKTEST" else "BTC-USD"
+        args.symbol = symbol
+        ltf = fetch_candles(symbol, args.ltf, args.days)
+    elif args.ltf_csv:
+        ltf = load_csv(args.ltf_csv)
+    else:
+        ap.error("provide --ltf-csv PATH or --fetch")
     if not ltf:
-        print("No bars loaded from", args.ltf_csv)
+        print("No bars loaded.")
         return
     params = ICCParams(htf_lookback=args.htf_lookback, ltf_lookback=args.ltf_lookback,
                        target_rr=args.target_rr)
