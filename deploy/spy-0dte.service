@@ -1,0 +1,26 @@
+[Unit]
+Description=SPY 0DTE call+put bot (one trading session)
+Documentation=https://github.com/quantus00/ALPACA
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=trader
+Group=trader
+WorkingDirectory=/opt/alpaca
+EnvironmentFile=/etc/alpaca/alpaca.env
+# --auto = unattended: armed rules + the hard time stop, never prompts.
+# The bot itself waits until --entry (10:34 ET), so the timer can fire earlier.
+ExecStart=/opt/alpaca/.venv/bin/python spy_0dte_bot.py run --auto --itm 3 --target 0.30 --entry 10:34 --exit 11:10
+TimeoutStartSec=4h
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/alpaca
+
+[Install]
+WantedBy=multi-user.target

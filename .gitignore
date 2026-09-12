@@ -7,3 +7,7 @@ venv/
 .pytest_cache/
 .DS_Store
 *.log
+
+# Never commit real env files (templates end in .example)
+*.env
+!*.env.example
