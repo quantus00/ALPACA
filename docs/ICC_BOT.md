@@ -25,6 +25,23 @@ or **Coinbase** (crypto) through a shared strategy engine.
 
 Full rationale is in each module's docstring: `strategy.py`, `structure.py`, `risk.py`.
 
+## Run it 24/7 (systemd)
+
+To keep the bot running after you log out, with auto-restart:
+
+```bash
+cd ~/ALPACA
+cp deploy/icc-bot.env.example /root/icc-bot.env      # then edit settings/keys
+sudo cp deploy/icc-bot.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now icc-bot                  # start now + on every boot
+journalctl -u icc-bot -f                             # watch the live heartbeat
+```
+
+Change settings by editing `/root/icc-bot.env` then `sudo systemctl restart icc-bot`.
+Stop with `sudo systemctl stop icc-bot`. (Alternatively, for a quick background
+run without systemd: `tmux new -s icc` then run `icc-bot`, detach with Ctrl-b d.)
+
 ## Coinbase derivatives (futures + perps)
 
 Set `ICC_VENUE`:
