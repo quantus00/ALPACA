@@ -221,13 +221,13 @@ class CoinbaseDerivativesBroker(Broker):
     def get_account(self) -> Account:
         if self.venue == "futures":
             bs = _attr(self.client.get_futures_balance_summary(), "balance_summary")
-            eq = float(_v(bs, "total_usd_balance", "cfm_usd_balance", "cbi_usd_balance", default=0.0))
-            bp = float(_v(bs, "futures_buying_power", default=eq))
+            eq = _money(_v(bs, "total_usd_balance", "cfm_usd_balance", "cbi_usd_balance"))
+            bp = _money(_v(bs, "futures_buying_power")) or eq
             return Account(equity=eq, cash=eq, buying_power=bp)
         # perp
         bal = _attr(self.client.get_perps_portfolio_balances(self.portfolio_uuid),
                     "portfolio_balances", "portfolio")
-        eq = float(_v(bal, "total_balance", "total_portfolio_balance", "buying_power", default=0.0))
+        eq = _money(_v(bal, "total_balance", "total_portfolio_balance", "buying_power"))
         return Account(equity=eq, cash=eq, buying_power=eq)
 
     def get_bars(self, symbol, timeframe, limit=300):
@@ -288,14 +288,28 @@ class CoinbaseDerivativesBroker(Broker):
         out = []
         for p in positions:
             sym = _v(p, "product_id", "symbol")
-            qty = _v(p, "number_of_contracts", "net_size", "position", default=0)
-            if sym and float(qty or 0) != 0:
-                out.append({"symbol": sym, "qty": float(qty)})
+            qty = _money(_v(p, "number_of_contracts", "net_size", "position"))
+            if sym and qty != 0:
+                out.append({"symbol": sym, "qty": qty})
         return out
 
 
 def _v(obj, *names, default=None):
     return _attr(obj, *names, default=default)
+
+
+def _money(x, default: float = 0.0) -> float:
+    """Coinbase money fields are often {"value": "123.45", "currency": "USD"}.
+    Return the numeric value whether given that object, a scalar, or None."""
+    if x is None:
+        return default
+    if isinstance(x, dict):
+        v = x.get("value")
+        return float(v) if v not in (None, "") else default
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return default
 
 
 def _fmt_price(p: float) -> str:
