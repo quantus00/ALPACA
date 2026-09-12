@@ -117,9 +117,15 @@ ICC_BROKER=coinbase ICC_SYMBOLS=BTC-USD,SOL-USD ICC_MODE=dry_run icc-bot
 ICC_BROKER=webull ICC_SYMBOLS=QQQ ICC_MODE=paper icc-bot
 ```
 
-`icc-bot` is the console script (equivalently `python -m icc_bot`). It logs every
-signal (direction, entry, stop, target, R:R, size). In dry-run it prints the
-order it *would* have placed.
+`icc-bot` is the console script (equivalently `python -m icc_bot`). It logs a
+one-line heartbeat every cycle (`symbol=status@price`) and, on a setup, the full
+bracket it would place. In dry-run nothing is sent.
+
+Run a single cycle and exit (testing / cron) instead of looping:
+
+```bash
+icc-bot --once
+```
 
 ## Recommended path
 
