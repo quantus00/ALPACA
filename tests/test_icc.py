@@ -239,12 +239,58 @@ def test_data_timeframe_seconds():
         timeframe_seconds("7m")
 
 
-def test_webapp_builds_and_serves_page():
-    pytest.importorskip("flask")
-    from icc_bot.webapp import create_app
-    client = create_app().test_client()
+def test_cockpit_builds_and_serves_page():
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from icc_bot.cockpit import create_app
+    client = TestClient(create_app())
     r = client.get("/")
-    assert r.status_code == 200 and b"ICC Backtest Cockpit" in r.data
+    assert r.status_code == 200 and "ICC Cockpit" in r.text
+    h = client.get("/api/health").json()
+    assert h["ok"] is True
+
+
+def test_cockpit_token_gate_blocks_unauthed(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("COCKPIT_TOKEN", "secret")
+    from icc_bot.cockpit import create_app
+    client = TestClient(create_app())
+    # health is open; a guarded endpoint requires the token
+    assert client.get("/api/bot/status").status_code == 401
+    ok = client.get("/api/bot/status", headers={"X-Cockpit-Token": "secret"})
+    assert ok.status_code == 200 and ok.json()["running"] is False
+
+
+def test_cockpit_order_dry_run_never_sends(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.delenv("COCKPIT_TOKEN", raising=False)
+    monkeypatch.setenv("ICC_BROKER", "coinbase")
+    monkeypatch.setenv("ICC_VENUE", "spot")
+    from icc_bot.cockpit import create_app
+    client = TestClient(create_app())
+    r = client.post("/api/order", json={"symbol": "BTC-USD", "side": "buy", "qty": 0.001})
+    j = r.json()
+    assert r.status_code == 200 and j["mode"] == "dry_run"
+    assert j["result"]["status"] == "dry_run"
+
+
+def test_cockpit_live_order_needs_confirm_and_optin(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.delenv("COCKPIT_TOKEN", raising=False)
+    monkeypatch.delenv("ICC_I_UNDERSTAND_LIVE_RISK", raising=False)
+    from icc_bot.cockpit import create_app
+    client = TestClient(create_app())
+    # live without the server opt-in is blocked (403), nothing sent
+    r = client.post("/api/order", json={"symbol": "BTC-USD", "side": "buy",
+                                        "qty": 0.001, "live": True, "confirm": "CONFIRM"})
+    assert r.status_code == 403
 
 
 def test_dry_run_broker_never_sends():

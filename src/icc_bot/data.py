@@ -57,3 +57,34 @@ def fetch_candles(product_id: str, timeframe: str, days: float) -> List[Bar]:
             break
     bars = [seen[t] for t in sorted(seen)]
     return bars[-need:]
+
+
+def fetch_ccxt(symbol: str, timeframe: str, days: float, exchange: str = "coinbase") -> List[Bar]:
+    """Deep-history OHLCV via ccxt (e.g. exchange='binanceus'/'kraken' for months
+    of 1m data). Accepts 'BTC-USD' or 'BTC/USD'. Public data, no keys needed."""
+    import ccxt  # optional dep
+
+    ex = getattr(ccxt, exchange)({"enableRateLimit": True})
+    ex.load_markets()
+    sym = symbol if "/" in symbol else symbol.replace("-", "/")
+    if sym not in ex.markets:
+        raise ValueError(f"{sym!r} not listed on {exchange}")
+    tf_ms = ex.parse_timeframe(timeframe) * 1000
+    end = ex.milliseconds()
+    cursor = end - int(days * 86400 * 1000)
+    seen: dict[int, Bar] = {}
+    reqs = 0
+    while cursor < end and reqs < 5000:
+        batch = ex.fetch_ohlcv(sym, timeframe, since=cursor, limit=300)
+        reqs += 1
+        if not batch:
+            break
+        for ms, o, h, l, c, v in batch:
+            if ms <= end:
+                seen[ms] = Bar(ts=int(ms // 1000), open=float(o), high=float(h),
+                               low=float(l), close=float(c), volume=float(v or 0.0))
+        nxt = batch[-1][0] + tf_ms
+        if nxt <= cursor:
+            break
+        cursor = nxt
+    return [seen[t] for t in sorted(seen)]

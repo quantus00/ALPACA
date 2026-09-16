@@ -85,11 +85,18 @@ Credentials: point `COINBASE_KEY_FILE` at your CDP key JSON (or set
 venue-agnostic), and the notional cap acts as a leverage guard — but a wrong
 multiplier means a wrong position size. Verify sizes in dry-run first.
 
-## Web cockpit (backtest in a browser)
+## Web cockpit (control surface in a browser)
 
-A point-and-click UI to toggle asset, timeframes, days of history, risk, and
-R:R — no CLI flags. Fetches candles from Coinbase and shows stats, an equity
-curve, and the trade list.
+A point-and-click dashboard for the whole bot — four tabs:
+
+- **Backtest** — toggle asset, timeframes, days, risk, and R:R with no CLI
+  flags. Pull candles from **Coinbase** or, for deep history with no keys, from
+  **ccxt** exchanges (`binanceus`, `kraken`, `coinbase`). Shows stats, an equity
+  curve, and every trade.
+- **Bot** — start/stop the ICC bot as a child process in `dry_run` / `paper` /
+  `live` with the settings you pick, and tail its log live.
+- **Positions** — current account equity/cash and open positions from your broker.
+- **Order** — a **guarded** manual order panel (see safety below).
 
 ```bash
 pip install -e '.[web]'
@@ -97,7 +104,18 @@ scripts/run_web.sh                 # serves on port 8787
 ```
 Open `http://<droplet-ip>:8787` (or forward the port in VS Code: Ports panel →
 Forward Port → 8787, then click the local URL). Set `ICC_WEB_PORT` to change it.
-Read-only market data — the cockpit never places orders.
+
+**Cockpit safety model:**
+- Set `COCKPIT_TOKEN=…` before exposing the port; then open the UI as
+  `http://<ip>:8787/?token=…`. Every `/api` call is rejected without it. Leaving
+  it unset is fine on a private droplet but the server logs a warning.
+- The cockpit never trades on its own — it only shows data and relays buttons.
+- Manual orders are **dry-run by default** (nothing is sent, no keys needed). A
+  **live** order refuses unless you both flip Live on *and* type `CONFIRM`, and
+  the whole app refuses live unless `ICC_I_UNDERSTAND_LIVE_RISK=yes` is set in
+  the server environment. Same gate applies to starting the bot in live mode.
+
+Launcher: `icc-cockpit` (equivalently `scripts/run_web.sh`).
 
 The CLI can also fetch instead of using a CSV:
 ```bash
