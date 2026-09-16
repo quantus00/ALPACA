@@ -1,0 +1,20 @@
+[Unit]
+Description=ICC trading bot (Coinbase futures/perps)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/ALPACA
+# All ICC_* and COINBASE_* settings live here (absolute paths; no ~ expansion):
+EnvironmentFile=/root/icc-bot.env
+ExecStart=/root/ALPACA/.venv/bin/icc-bot
+Restart=on-failure
+RestartSec=10
+# Keep a bounded amount of logs in the journal.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
