@@ -132,7 +132,34 @@ timeframes agree; the trigger re-arms once alignment is lost.
 
 ---
 
-## 4. Tests
+## 4. Cross-venue spread logger (research only)
+
+`bot/spread_logger.py` logs the price gap between **Coinbase** and **Webull**
+for **BTC-USD** and **DOGE-USD** so a cross-venue spread idea can be evaluated
+on real data. It **never places a trade** — it only appends to a CSV.
+
+```bash
+python -m bot.spread_logger            # poll both venues every 60s
+python -m bot.spread_logger --once     # single poll then exit
+```
+
+- **Coinbase** uses the public REST ticker (`api.exchange.coinbase.com`, no auth).
+- **Webull** has no official public crypto price API. If the community `webull`
+  package + `WEBULL_*` credentials are present it logs live quotes; otherwise the
+  Webull fetch is a clearly-marked stub and the loop keeps running on Coinbase
+  alone. The startup banner and each status line say which venues are **LIVE**.
+- A raw price gap is **not** profit: Webull bakes in a ~1% spread per side and
+  Coinbase entry-tier fees are ~0.6–1.2% per side. Each row therefore logs both
+  `raw_gap_pct` **and** `net_gap_after_costs_pct` (raw minus a ~3% round-trip
+  cost). Only a **net gap above 0** is potentially tradeable.
+
+Output `gaps_log.csv` columns: `timestamp, asset, coinbase_price, webull_price,
+raw_gap_pct, net_gap_after_costs_pct`. Each fetch is wrapped in try/except, so a
+single failed poll logs a timestamped error and the loop continues.
+
+---
+
+## 5. Tests
 
 ```bash
 python tests/test_trend.py      # or: pytest tests/
