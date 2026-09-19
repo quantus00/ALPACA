@@ -140,13 +140,29 @@ python -m bot.main balances --leg coinbase --leg webull
 |--------|------|---------|
 | `BOT_TP_PCT` | `--tp` | **Combined** basket take-profit % |
 | `BOT_SL_PCT` | `--sl` | **Combined** basket stop-loss % (magnitude) |
-| `BOT_LEG_TP_PCT` | `--leg-tp` | **Single-leg** take-profit % (any leg hits → flatten all) |
-| `BOT_LEG_SL_PCT` | `--leg-sl` | **Single-leg** stop-loss % (any leg hits → flatten all) |
+| `BOT_LEG_TP_PCT` | `--leg-tp` | **Single-leg** take-profit % |
+| `BOT_LEG_SL_PCT` | `--leg-sl` | **Single-leg** stop-loss % |
 
-The combined P/L weights each leg by its notional (cost basis), so the option
-leg's ×100 multiplier is accounted for. Open legs are saved to `BOT_STATE_FILE`
-so `flatten` / `status` work even after a restart. Leave every toggle at `0`
-(the default) and `dual` just opens the legs and leaves them open.
+**Single vs combined flatten** (`BOT_FLATTEN_MODE` / `--flatten-mode`) — what a
+tripped **per-leg** rule does:
+
+| Mode | A leg hits its `--leg-tp` / `--leg-sl` … |
+|------|------------------------------------------|
+| `combined` (default) | …flattens **every** leg together |
+| `single` | …flattens **only that leg**; the others keep running until they exit too |
+
+```bash
+# Close each leg on its own +3% / -2%, independently:
+python -m bot.main dual --leg coinbase:btc_usd_spot:0.01 --leg webull:spy_options:1 \
+    --leg-tp 3 --leg-sl 2 --flatten-mode single --live
+```
+
+A **combined** basket rule (`--tp` / `--sl`) always closes the whole basket,
+regardless of the mode. The combined P/L weights each leg by its notional (cost
+basis), so the option leg's ×100 multiplier is accounted for. Open legs are saved
+to `BOT_STATE_FILE` so `flatten` / `status` work even after a restart. Leave
+every toggle at `0` (the default) and `dual` just opens the legs and leaves them
+open.
 
 ---
 

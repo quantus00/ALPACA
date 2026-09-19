@@ -88,6 +88,10 @@ class Config:
     sl_pct: float = float(os.getenv("BOT_SL_PCT", "0"))       # combined stop-loss (magnitude)
     leg_tp_pct: float = float(os.getenv("BOT_LEG_TP_PCT", "0"))
     leg_sl_pct: float = float(os.getenv("BOT_LEG_SL_PCT", "0"))
+    # How a tripped *per-leg* rule closes: "combined" flattens every leg
+    # together; "single" flattens only the leg that hit its threshold and lets
+    # the rest keep running. (Combined tp/sl always flattens everything.)
+    flatten_mode: str = os.getenv("BOT_FLATTEN_MODE", "combined")
     # Multi-leg spec, e.g. "coinbase:btc_usd_spot:0.01,webull:spy_options:1".
     legs: str = os.getenv("BOT_LEGS", "")
     state_file: str = os.getenv("BOT_STATE_FILE", "bot_state.json")

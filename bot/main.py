@@ -48,6 +48,8 @@ def _build_config(args, validate: bool = True) -> Config:
         val = getattr(args, name, None)
         if val is not None:
             setattr(cfg, f"{name}_pct", val)
+    if getattr(args, "flatten_mode", None) is not None:
+        cfg.flatten_mode = args.flatten_mode
     if validate:
         cfg.validate()
     return cfg
@@ -105,7 +107,7 @@ def _run_dual(cfg: Config, args) -> None:
         return
     marks = dual_mod.marks_for(cfg, legs)
     log.info("Opened:\n%s", dual_mod.report(legs, marks))
-    dual_mod.monitor(cfg, legs, dual_mod.rules_from(cfg))
+    dual_mod.monitor(cfg, legs, dual_mod.rules_from(cfg), cfg.flatten_mode)
 
 
 def _run_flatten(cfg: Config) -> None:
@@ -161,6 +163,10 @@ def main(argv=None) -> None:
                         "(repeatable). For `balances`, a bare broker name works.")
     p.add_argument("--side", choices=["buy", "sell"], default="buy",
                    help="dual: open direction for every leg (default buy)")
+    p.add_argument("--flatten-mode", dest="flatten_mode",
+                   choices=["combined", "single"],
+                   help="dual: a tripped per-leg rule closes all legs "
+                        "(combined) or only that leg (single)")
     p.add_argument("--tp", type=float, help="combined take-profit %%")
     p.add_argument("--sl", type=float, help="combined stop-loss %% (magnitude)")
     p.add_argument("--leg-tp", dest="leg_tp", type=float, help="per-leg take-profit %%")

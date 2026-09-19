@@ -6,7 +6,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from bot.portfolio import (ExitRules, Leg, clear_state, combined_pnl_pct,  # noqa: E402
-                           load_state, save_state, should_flatten)
+                           flatten_plan, load_state, save_state, should_flatten)
 
 
 def _btc(entry=100.0, size=1.0, side="buy"):
@@ -89,6 +89,35 @@ def test_no_rule_no_flatten():
     btc = _btc(entry=100.0, size=1.0)
     flat, reason = should_flatten([btc], [110.0], ExitRules())
     assert not flat and reason == ""
+
+
+def test_single_mode_flattens_only_the_tripped_leg():
+    # Leg 0 hits its +25% take-profit; leg 1 is flat. Combined TP is far off.
+    win = _btc(entry=100.0, size=1.0)              # mark 130 -> +30%
+    calm = _btc(entry=100.0, size=1.0)             # mark 100 -> 0%
+    rules = ExitRules(leg_tp_pct=25.0)
+    plan = flatten_plan([win, calm], [130.0, 100.0], rules, mode="single")
+    assert [i for i, _ in plan] == [0]             # only leg 0
+    assert "leg take-profit" in plan[0][1]
+
+
+def test_combined_mode_flattens_all_on_a_per_leg_hit():
+    win = _btc(entry=100.0, size=1.0)              # +30%
+    calm = _btc(entry=100.0, size=1.0)             # 0%
+    rules = ExitRules(leg_tp_pct=25.0)
+    plan = flatten_plan([win, calm], [130.0, 100.0], rules, mode="combined")
+    assert sorted(i for i, _ in plan) == [0, 1]    # every leg
+    assert "flatten all" in plan[0][1]
+
+
+def test_combined_basket_rule_flattens_all_in_single_mode_too():
+    # A combined tp/sl always closes the whole basket, regardless of mode.
+    a = _btc(entry=100.0, size=1.0)
+    b = _btc(entry=100.0, size=1.0)
+    rules = ExitRules(tp_pct=5.0)
+    plan = flatten_plan([a, b], [110.0, 110.0], rules, mode="single")  # +10% combined
+    assert sorted(i for i, _ in plan) == [0, 1]
+    assert "take-profit" in plan[0][1]
 
 
 def test_state_roundtrip():

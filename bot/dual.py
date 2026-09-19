@@ -17,7 +17,7 @@ from .brokers.base import BrokerBase
 from .config import (INSTRUMENT_BROKERS, INSTRUMENT_MULTIPLIER, Broker, Config,
                      Instrument)
 from .portfolio import (ExitRules, Leg, clear_state, combined_pnl_pct,
-                        load_state, save_state, should_flatten)
+                        flatten_plan, load_state, save_state)
 
 log = logging.getLogger(__name__)
 
@@ -125,8 +125,8 @@ def report(legs: list[Leg], marks: list[float | None]) -> str:
 
 
 # -- flatten -----------------------------------------------------------------
-def flatten_all(base: Config, legs: list[Leg]) -> None:
-    """Flatten every open leg concurrently, then clear saved state."""
+def _flatten_legs(base: Config, legs: list[Leg]) -> None:
+    """Send the offsetting order for each given leg, concurrently."""
 
     def _flat(leg: Leg):
         broker = _broker_for(base, Broker(leg.broker), Instrument(leg.instrument),
@@ -139,32 +139,54 @@ def flatten_all(base: Config, legs: list[Leg]) -> None:
             log.error("Flatten %s failed: %s", leg.broker, res.error)
         return res
 
+    if not legs:
+        return
     with ThreadPoolExecutor(max_workers=max(1, len(legs))) as pool:
         list(pool.map(_flat, legs))
+
+
+def flatten_all(base: Config, legs: list[Leg]) -> None:
+    """Flatten every open leg, then clear saved state."""
+    _flatten_legs(base, legs)
     clear_state(base.state_file)
 
 
 # -- monitor -----------------------------------------------------------------
-def monitor(base: Config, legs: list[Leg], rules: ExitRules) -> None:
-    """Poll marks; log single + combined P/L; flatten all when a rule trips."""
+def monitor(base: Config, legs: list[Leg], rules: ExitRules,
+            mode: str = "combined") -> None:
+    """Poll marks; log single + combined P/L; flatten legs when a rule trips.
+
+    ``mode`` ("combined" | "single") controls whether a tripped per-leg rule
+    closes every leg or only the leg that hit. In single mode the surviving legs
+    keep being monitored until they too exit."""
     import time
 
     if not rules.active():
         log.info("No P/L exit rules set (BOT_TP_PCT / BOT_SL_PCT / BOT_LEG_*); "
                  "positions left open. Use `flatten` to close.")
         return
-    log.info("Monitoring %d leg(s) every %ss; rules: tp=%g sl=%g leg_tp=%g leg_sl=%g",
-             len(legs), base.poll_seconds, rules.tp_pct, rules.sl_pct,
-             rules.leg_tp_pct, rules.leg_sl_pct)
-    while True:
+    log.info("Monitoring %d leg(s) every %ss; mode=%s rules: tp=%g sl=%g "
+             "leg_tp=%g leg_sl=%g", len(legs), base.poll_seconds, mode,
+             rules.tp_pct, rules.sl_pct, rules.leg_tp_pct, rules.leg_sl_pct)
+    open_legs = list(legs)
+    while open_legs:
         try:
-            marks = marks_for(base, legs)
-            log.info("P/L:\n%s", report(legs, marks))
-            flat, reason = should_flatten(legs, marks, rules)
-            if flat:
-                log.info("EXIT TRIGGERED: %s -> flattening all legs", reason)
-                flatten_all(base, legs)
-                return
+            marks = marks_for(base, open_legs)
+            log.info("P/L:\n%s", report(open_legs, marks))
+            plan = flatten_plan(open_legs, marks, rules, mode)
+            if plan:
+                idxs = sorted({i for i, _ in plan})
+                for _, reason in plan:
+                    log.info("EXIT TRIGGERED: %s", reason)
+                to_close = [open_legs[i] for i in idxs]
+                _flatten_legs(base, to_close)
+                open_legs = [leg for j, leg in enumerate(open_legs) if j not in idxs]
+                if open_legs:
+                    save_state(base.state_file, open_legs)
+                    log.info("%d leg(s) still open (single mode).", len(open_legs))
+                else:
+                    clear_state(base.state_file)
+                    return
         except Exception:  # noqa: BLE001
             log.exception("monitor tick failed")
         time.sleep(base.poll_seconds)

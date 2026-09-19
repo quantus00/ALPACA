@@ -87,26 +87,51 @@ class ExitRules:
         return any((self.tp_pct, self.sl_pct, self.leg_tp_pct, self.leg_sl_pct))
 
 
-def should_flatten(legs: list[Leg], marks: list[float | None],
-                   rules: ExitRules) -> tuple[bool, str]:
-    """Return ``(flatten?, reason)``. Checks the combined basket first, then each
-    leg independently. The first rule to trip wins."""
+def flatten_plan(legs: list[Leg], marks: list[float | None], rules: ExitRules,
+                 mode: str = "combined") -> list[tuple[int, str]]:
+    """Decide which legs to flatten, as ``[(leg_index, reason), ...]``.
+
+    A **combined** basket rule (tp/sl) always flattens every leg. A **per-leg**
+    rule flattens per ``mode``:
+      * ``"combined"`` — any leg hitting its threshold flattens *all* legs;
+      * ``"single"``   — flatten only the leg(s) that hit, leaving the rest open.
+    An empty list means "hold".
+    """
     combined = combined_pnl_pct(legs, marks)
     if combined is not None:
         if rules.tp_pct > 0 and combined >= rules.tp_pct:
-            return True, f"combined P/L {combined:+.2f}% >= take-profit {rules.tp_pct:g}%"
+            reason = f"combined P/L {combined:+.2f}% >= take-profit {rules.tp_pct:g}%"
+            return [(i, reason) for i in range(len(legs))]
         if rules.sl_pct > 0 and combined <= -rules.sl_pct:
-            return True, f"combined P/L {combined:+.2f}% <= stop-loss -{rules.sl_pct:g}%"
+            reason = f"combined P/L {combined:+.2f}% <= stop-loss -{rules.sl_pct:g}%"
+            return [(i, reason) for i in range(len(legs))]
 
-    for leg, mark in zip(legs, marks):
+    hits: list[tuple[int, str]] = []
+    for i, (leg, mark) in enumerate(zip(legs, marks)):
         pct = leg.pnl_pct(mark)
         if pct is None:
             continue
         if rules.leg_tp_pct > 0 and pct >= rules.leg_tp_pct:
-            return True, f"{leg.broker} leg P/L {pct:+.2f}% >= leg take-profit {rules.leg_tp_pct:g}%"
-        if rules.leg_sl_pct > 0 and pct <= -rules.leg_sl_pct:
-            return True, f"{leg.broker} leg P/L {pct:+.2f}% <= leg stop-loss -{rules.leg_sl_pct:g}%"
-    return False, ""
+            hits.append((i, f"{leg.broker} leg P/L {pct:+.2f}% >= leg take-profit {rules.leg_tp_pct:g}%"))
+        elif rules.leg_sl_pct > 0 and pct <= -rules.leg_sl_pct:
+            hits.append((i, f"{leg.broker} leg P/L {pct:+.2f}% <= leg stop-loss -{rules.leg_sl_pct:g}%"))
+
+    if not hits:
+        return []
+    if mode == "single":
+        return hits
+    # combined mode: any per-leg hit flattens the whole basket.
+    reason = "; ".join(r for _, r in hits) + " -> flatten all (combined mode)"
+    return [(i, reason) for i in range(len(legs))]
+
+
+def should_flatten(legs: list[Leg], marks: list[float | None],
+                   rules: ExitRules) -> tuple[bool, str]:
+    """Back-compat helper: ``(flatten_all?, reason)`` under combined mode."""
+    plan = flatten_plan(legs, marks, rules, mode="combined")
+    if not plan:
+        return False, ""
+    return True, plan[0][1]
 
 
 # -- persistence -------------------------------------------------------------
