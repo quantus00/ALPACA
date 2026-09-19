@@ -16,6 +16,10 @@ class OrderResult:
     side: str
     size: float
     order_id: str | None = None
+    #: average fill / entry price when known (used as the P/L cost basis).
+    fill_price: float | None = None
+    #: extra per-order context the flatten path needs (e.g. an option id).
+    meta: dict = field(default_factory=dict)
     raw: dict = field(default_factory=dict)
     error: str | None = None
 
@@ -41,8 +45,25 @@ class BrokerBase(ABC):
         """Place a market order. ``side`` is 'buy' or 'sell'. ``size`` is the
         contract-size toggle interpreted per instrument."""
 
+    # -- Position / account reads (optional; override where supported) --------
+    def mark_price(self, symbol: str | None = None,
+                   meta: dict | None = None) -> float | None:
+        """Current price of an open position, for P/L. ``symbol`` / ``meta``
+        carry the open leg's context (e.g. an option id). Returns ``None`` when
+        the broker cannot price it."""
+        return None
+
+    def get_balances(self) -> dict:  # pragma: no cover - default
+        """Return account balances as ``{label: amount}``. Empty when the broker
+        does not implement it."""
+        return {}
+
     # Optional; brokers that support flattening override this.
-    def flatten(self) -> OrderResult:  # pragma: no cover - default
+    def flatten(self, side: str | None = None, size: float | None = None,
+                symbol: str | None = None, meta: dict | None = None) -> OrderResult:
+        """Close an open position. ``side``/``size`` describe the *open* leg so
+        the broker can send the offsetting order; ``symbol``/``meta`` carry any
+        extra context (e.g. an option id)."""
         return OrderResult(ok=False, broker=self.__class__.__name__,
-                           symbol=self.cfg.symbol(), side="flat", size=0,
+                           symbol=symbol or self.cfg.symbol(), side="flat", size=0,
                            error="flatten not implemented")

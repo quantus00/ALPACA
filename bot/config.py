@@ -41,6 +41,15 @@ INSTRUMENT_SYMBOLS: dict[Instrument, str] = {
     Instrument.MES_FUTURES: "MES",
 }
 
+# Contract multiplier per instrument, used to weight each leg's dollar P/L when
+# combining legs of different notional (options are quoted per-share x100).
+INSTRUMENT_MULTIPLIER: dict[Instrument, float] = {
+    Instrument.BTC_USD_SPOT: 1.0,
+    Instrument.BTC_NANO_PERP: 1.0,
+    Instrument.SPY_OPTIONS: 100.0,
+    Instrument.MES_FUTURES: 5.0,
+}
+
 
 def _env_bool(name: str, default: bool = False) -> bool:
     return os.getenv(name, str(default)).strip().lower() in ("1", "true", "yes", "on")
@@ -70,6 +79,18 @@ class Config:
     # ---- Options-specific knobs ---------------------------------------------
     option_dte: int = int(os.getenv("BOT_OPTION_DTE", "0"))          # target days-to-expiry
     option_delta_target: float = float(os.getenv("BOT_OPTION_DELTA", "0.40"))
+
+    # ---- Dual-broker P/L exits ----------------------------------------------
+    # Percentages; 0 disables that rule. Combined = the whole basket; leg_* =
+    # each broker's own position watched independently. Any rule that trips
+    # flattens *every* open leg at once.
+    tp_pct: float = float(os.getenv("BOT_TP_PCT", "0"))       # combined take-profit
+    sl_pct: float = float(os.getenv("BOT_SL_PCT", "0"))       # combined stop-loss (magnitude)
+    leg_tp_pct: float = float(os.getenv("BOT_LEG_TP_PCT", "0"))
+    leg_sl_pct: float = float(os.getenv("BOT_LEG_SL_PCT", "0"))
+    # Multi-leg spec, e.g. "coinbase:btc_usd_spot:0.01,webull:spy_options:1".
+    legs: str = os.getenv("BOT_LEGS", "")
+    state_file: str = os.getenv("BOT_STATE_FILE", "bot_state.json")
 
     # ---- Runtime knobs -------------------------------------------------------
     dry_run: bool = _env_bool("BOT_DRY_RUN", True)

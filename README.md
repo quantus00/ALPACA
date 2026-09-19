@@ -110,6 +110,44 @@ Allow pop-ups for the site so both windows can open.
 The bot logs `4H TREND: UPTREND` / `DOWNTREND` on every confirmed flip, and can
 also push to Discord and/or Telegram (`NOTIFY_*` in `.env`).
 
+### Dual-broker: buy on Webull **and** Coinbase at once, flatten both on P/L
+
+Open the same side on **several brokers simultaneously**, watch the P/L, and
+**flatten every leg together** when a percentage you choose is hit. You pick the
+instrument and size for each broker at launch (a "leg" is
+`broker:instrument:size`):
+
+```bash
+# Buy 0.01 BTC on Coinbase AND 1 SPY option on Webull at the same time,
+# then flatten BOTH when the combined basket P/L hits +2% or -1%.
+python -m bot.main dual \
+    --leg coinbase:btc_usd_spot:0.01 \
+    --leg webull:spy_options:1 \
+    --tp 2 --sl 1 --live
+
+python -m bot.main status     # show each leg's single P/L + the combined P/L
+python -m bot.main flatten     # close every open leg now
+python -m bot.main balances --leg coinbase --leg webull
+```
+
+> ⚠️ Each broker still trades its **own** instrument. In this repo Coinbase
+> trades BTC and Webull trades SPY options — firing them together does **not**
+> make Webull buy BTC. Pick whatever instrument/size you want per leg.
+
+**Two P/L views, four toggles** — any rule that trips flattens *all* legs:
+
+| Toggle | Flag | Meaning |
+|--------|------|---------|
+| `BOT_TP_PCT` | `--tp` | **Combined** basket take-profit % |
+| `BOT_SL_PCT` | `--sl` | **Combined** basket stop-loss % (magnitude) |
+| `BOT_LEG_TP_PCT` | `--leg-tp` | **Single-leg** take-profit % (any leg hits → flatten all) |
+| `BOT_LEG_SL_PCT` | `--leg-sl` | **Single-leg** stop-loss % (any leg hits → flatten all) |
+
+The combined P/L weights each leg by its notional (cost basis), so the option
+leg's ×100 multiplier is accounted for. Open legs are saved to `BOT_STATE_FILE`
+so `flatten` / `status` work even after a restart. Leave every toggle at `0`
+(the default) and `dual` just opens the legs and leaves them open.
+
 ---
 
 ## 3. How the trend logic works
