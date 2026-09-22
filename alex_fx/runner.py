@@ -25,6 +25,7 @@ import time
 
 from alex_bot.strategy import Params, Trend, evaluate
 from . import data as fxdata
+from . import scanner as fxscan
 from .backtest import backtest
 from .broker import get_broker
 from .instrument import lots_for_risk
@@ -40,6 +41,19 @@ def _fetch_candles(args, tf: str):
     if args.source == "csv":
         return fxdata.load_csv(args.csv)
     return fxdata.get_candles(args.pair, tf, args.source)   # yahoo | stooq (keyless)
+
+
+def run_scan(args, params: Params) -> int:
+    """Scan every pair for a setup — the on-open screener. Keyless."""
+    pairs = ([s.strip() for s in args.pairs.split(",")] if args.pairs
+             else fxscan.DEFAULT_UNIVERSE)
+    fetch = lambda pair, tf: fxdata.get_candles(pair, tf, args.source)  # noqa: E731
+    log.info("Scanning %d pairs (entry=%s structure=%s, data=%s)...",
+             len(pairs), args.entry_tf, args.structure_tf, args.source)
+    rows = fxscan.scan(fetch, params, args.entry_tf, args.structure_tf, pairs,
+                       workers=args.workers)
+    print(fxscan.format_table(rows, show=args.show))
+    return 0
 
 
 def run_backtest(args, params: Params) -> int:
@@ -134,6 +148,18 @@ def run_forward(args, params: Params, live: bool) -> int:
 
     if live and args.broker == "sim":
         print("note: 'live' with --broker sim just simulates locally (no real orders).")
+
+    # Opening scan: screen the whole universe once so you see the board on start.
+    if not args.no_scan and args.broker == "sim":
+        try:
+            fetch = lambda pair, tf: fxdata.get_candles(pair, tf, args.source)  # noqa: E731
+            rows = fxscan.scan(fetch, params, args.entry_tf, args.structure_tf,
+                               workers=args.workers)
+            print("=== opening scan ===")
+            print(fxscan.format_table(rows, show="actionable"))
+        except Exception:  # noqa: BLE001
+            log.warning("opening scan skipped (data unavailable)")
+
     log.info("%s trading %s (entry=%s structure=%s, data=%s) every %ss",
              label, args.pair, args.entry_tf, args.structure_tf, args.source, args.poll)
     while True:
@@ -156,8 +182,13 @@ def selftest() -> int:
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Alex FOREX bot (FOREX.com)")
-    p.add_argument("command", choices=["backtest", "paper", "live", "selftest"])
+    p.add_argument("command", choices=["scan", "backtest", "paper", "live", "selftest"])
     p.add_argument("--pair", default="EUR/USD")
+    p.add_argument("--pairs", help="scan: comma-separated pairs (default: full universe)")
+    p.add_argument("--show", choices=["setups", "actionable", "all"],
+                   default="actionable", help="scan: which rows to print")
+    p.add_argument("--workers", type=int, default=8, help="scan concurrency")
+    p.add_argument("--no-scan", action="store_true", help="skip the opening scan")
     p.add_argument("--source", choices=["yahoo", "stooq", "csv", "demo"],
                    default="yahoo",
                    help="KEYLESS data source (yahoo intraday / stooq daily), "
@@ -197,6 +228,8 @@ def main(argv=None) -> int:
     params = Params(pivot_lookback=args.pivot_lookback, aoi_tol_frac=args.aoi_tol,
                     min_touches=args.min_touches, wick_ratio=args.wick_ratio,
                     rr=args.rr)
+    if args.command == "scan":
+        return run_scan(args, params)
     if args.command == "backtest":
         if args.source == "csv" and not args.csv:
             print("--source csv needs --csv <file>")
