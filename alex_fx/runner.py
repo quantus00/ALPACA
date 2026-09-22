@@ -35,6 +35,20 @@ log = logging.getLogger("alexfx")
 STATE_FILE = os.getenv("ALEXFX_STATE_FILE", "alexfx_state.json")
 
 
+def _load_env_file(path: str) -> None:
+    """Load simple KEY=VALUE lines into the environment (for OANDA creds)."""
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    except OSError as exc:
+        log.warning("could not read env file %s: %s", path, exc)
+
+
 def _make_fetch(args):
     """Return a fetch(pair, tf) -> candles for the chosen data source."""
     if args.source == "oanda":
@@ -207,17 +221,19 @@ def main(argv=None) -> int:
                    default="actionable", help="scan: which rows to print")
     p.add_argument("--workers", type=int, default=8, help="scan concurrency")
     p.add_argument("--no-scan", action="store_true", help="skip the opening scan")
-    p.add_argument("--source", choices=["yahoo", "stooq", "oanda", "csv", "demo"],
-                   default="yahoo",
-                   help="data source: yahoo/stooq (keyless), oanda (v20, token), "
-                        "csv, demo. Default yahoo.")
+    p.add_argument("--source", choices=["oanda", "yahoo", "stooq", "csv", "demo"],
+                   default="oanda",
+                   help="data source: oanda (v20, default), yahoo/stooq (keyless), "
+                        "csv, demo.")
     p.add_argument("--csv", help="historical OHLC CSV (implies --source csv)")
     p.add_argument("--demo", action="store_true", help="synthetic data (implies --source demo)")
-    p.add_argument("--broker", choices=["sim", "oanda", "forexcom"], default="sim",
-                   help="execution: sim = keyless local simulator (default); "
-                        "oanda = OANDA v20 (practice=paper, live); forexcom = FOREX.com")
+    p.add_argument("--broker", choices=["oanda", "sim", "forexcom"], default="oanda",
+                   help="execution: oanda = OANDA v20 (default; practice=paper, live); "
+                        "sim = keyless local simulator; forexcom = FOREX.com")
     p.add_argument("--env", choices=["practice", "live"], default="practice",
-                   help="OANDA/source account env (practice = paper)")
+                   help="OANDA account env (practice = paper, default)")
+    p.add_argument("--env-file", dest="env_file",
+                   help="load KEY=VALUE lines (e.g. OANDA_API_TOKEN=...) before running")
     p.add_argument("--trades", action="store_true", help="print each backtest trade")
     p.add_argument("--spread", type=float, default=1.0, help="modeled spread (pips)")
     p.add_argument("--warmup", type=int, default=60)
@@ -238,6 +254,8 @@ def main(argv=None) -> int:
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if args.env_file:
+        _load_env_file(args.env_file)
     # Convenience flags override --source.
     if args.csv:
         args.source = "csv"
