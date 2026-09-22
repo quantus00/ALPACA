@@ -29,25 +29,34 @@ from . import scanner as fxscan
 from .backtest import backtest
 from .broker import get_broker
 from .instrument import lots_for_risk
+from .oanda import OandaBroker, OandaClient
 
 log = logging.getLogger("alexfx")
 STATE_FILE = os.getenv("ALEXFX_STATE_FILE", "alexfx_state.json")
 
 
-def _fetch_candles(args, tf: str):
-    """Keyless candle source for backtest/paper: demo | csv | yahoo | stooq."""
+def _make_fetch(args):
+    """Return a fetch(pair, tf) -> candles for the chosen data source."""
+    if args.source == "oanda":
+        client = OandaClient(env=args.env)
+        return lambda pair, tf: client.candles(pair, tf, 300)
     if args.source == "demo":
-        return fxdata.synthetic_uptrend_with_pullback(args.pair)
+        return lambda pair, tf: fxdata.synthetic_uptrend_with_pullback(pair)
+    return lambda pair, tf: fxdata.get_candles(pair, tf, args.source)  # yahoo|stooq (keyless)
+
+
+def _fetch_candles(args, tf: str):
+    """Single-pair candles for backtest: demo | csv | yahoo | stooq | oanda."""
     if args.source == "csv":
         return fxdata.load_csv(args.csv)
-    return fxdata.get_candles(args.pair, tf, args.source)   # yahoo | stooq (keyless)
+    return _make_fetch(args)(args.pair, tf)
 
 
 def run_scan(args, params: Params) -> int:
     """Scan every pair for a setup — the on-open screener. Keyless."""
     pairs = ([s.strip() for s in args.pairs.split(",")] if args.pairs
              else fxscan.DEFAULT_UNIVERSE)
-    fetch = lambda pair, tf: fxdata.get_candles(pair, tf, args.source)  # noqa: E731
+    fetch = _make_fetch(args)
     log.info("Scanning %d pairs (entry=%s structure=%s, data=%s)...",
              len(pairs), args.entry_tf, args.structure_tf, args.source)
     rows = fxscan.scan(fetch, params, args.entry_tf, args.structure_tf, pairs,
@@ -132,29 +141,38 @@ def trade_tick(fetch, exec_broker, args, params: Params) -> None:
 
 
 def run_forward(args, params: Params, live: bool) -> int:
-    # KEYLESS by default: local simulator with free (Yahoo/Stooq) data.
-    if args.broker == "sim":
-        exec_broker = get_broker("sim")           # SimBroker, no keys, no orders sent
-        fetch = lambda tf: fxdata.get_candles(args.pair, tf, args.source)  # noqa: E731
+    if args.broker == "oanda":
+        env = "live" if live else "practice"      # practice = paper
+        if live and not args.live:
+            print("refusing OANDA live without --live (master arm).")
+            return 2
+        exec_broker = OandaBroker(env=env)
+        pair_fetch = lambda tf: exec_broker.price_history(args.pair, tf, 300)  # noqa: E731
+        scan_fetch = lambda pair, tf: exec_broker.price_history(pair, tf, 300)  # noqa: E731
+        label = f"OANDA {env.upper()}"
+    elif args.broker == "sim":                    # keyless local simulator
+        exec_broker = get_broker("sim")
+        base = _make_fetch(args)
+        pair_fetch = lambda tf: base(args.pair, tf)  # noqa: E731
+        scan_fetch = base
         label = "PAPER-SIM (keyless)"
-    else:  # forexcom demo/live (needs FOREX.com creds)
+        if live:
+            print("note: 'live' with --broker sim just simulates locally (no real orders).")
+    else:                                         # forexcom demo/live
         mode = "live" if live else "demo"
         if live and not args.live:
             print("refusing live without --live (master arm). Add --live to trade real money.")
             return 2
         exec_broker = get_broker(mode)
-        fetch = lambda tf: exec_broker.price_history(args.pair, tf, 300)   # noqa: E731
+        pair_fetch = lambda tf: exec_broker.price_history(args.pair, tf, 300)  # noqa: E731
+        scan_fetch = lambda pair, tf: exec_broker.price_history(pair, tf, 300)  # noqa: E731
         label = f"FOREX.com {mode.upper()}"
 
-    if live and args.broker == "sim":
-        print("note: 'live' with --broker sim just simulates locally (no real orders).")
-
     # Opening scan: screen the whole universe once so you see the board on start.
-    if not args.no_scan and args.broker == "sim":
+    if not args.no_scan:
         try:
-            fetch = lambda pair, tf: fxdata.get_candles(pair, tf, args.source)  # noqa: E731
-            rows = fxscan.scan(fetch, params, args.entry_tf, args.structure_tf,
-                               workers=args.workers)
+            rows = fxscan.scan(scan_fetch, params, args.entry_tf,
+                               args.structure_tf, workers=args.workers)
             print("=== opening scan ===")
             print(fxscan.format_table(rows, show="actionable"))
         except Exception:  # noqa: BLE001
@@ -164,7 +182,7 @@ def run_forward(args, params: Params, live: bool) -> int:
              label, args.pair, args.entry_tf, args.structure_tf, args.source, args.poll)
     while True:
         try:
-            trade_tick(fetch, exec_broker, args, params)
+            trade_tick(pair_fetch, exec_broker, args, params)
         except Exception:  # noqa: BLE001
             log.exception("tick failed")
         time.sleep(args.poll)
@@ -189,15 +207,17 @@ def main(argv=None) -> int:
                    default="actionable", help="scan: which rows to print")
     p.add_argument("--workers", type=int, default=8, help="scan concurrency")
     p.add_argument("--no-scan", action="store_true", help="skip the opening scan")
-    p.add_argument("--source", choices=["yahoo", "stooq", "csv", "demo"],
+    p.add_argument("--source", choices=["yahoo", "stooq", "oanda", "csv", "demo"],
                    default="yahoo",
-                   help="KEYLESS data source (yahoo intraday / stooq daily), "
-                        "or csv / demo. Default yahoo — no API key.")
+                   help="data source: yahoo/stooq (keyless), oanda (v20, token), "
+                        "csv, demo. Default yahoo.")
     p.add_argument("--csv", help="historical OHLC CSV (implies --source csv)")
     p.add_argument("--demo", action="store_true", help="synthetic data (implies --source demo)")
-    p.add_argument("--broker", choices=["sim", "forexcom"], default="sim",
-                   help="paper/live execution: sim = keyless local simulator "
-                        "(default), forexcom = FOREX.com demo/live (needs creds)")
+    p.add_argument("--broker", choices=["sim", "oanda", "forexcom"], default="sim",
+                   help="execution: sim = keyless local simulator (default); "
+                        "oanda = OANDA v20 (practice=paper, live); forexcom = FOREX.com")
+    p.add_argument("--env", choices=["practice", "live"], default="practice",
+                   help="OANDA/source account env (practice = paper)")
     p.add_argument("--trades", action="store_true", help="print each backtest trade")
     p.add_argument("--spread", type=float, default=1.0, help="modeled spread (pips)")
     p.add_argument("--warmup", type=int, default=60)
