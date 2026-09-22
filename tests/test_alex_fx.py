@@ -81,6 +81,20 @@ def test_parse_time_unix_and_iso():
     assert fxdata._parse_time("2026-06-01T00:00:00") > 0         # iso
 
 
+def test_parse_yahoo_keyless_payload():
+    # Shape of the keyless Yahoo chart endpoint; nulls are skipped.
+    payload = {"chart": {"result": [{
+        "timestamp": [1000, 2000, 3000],
+        "indicators": {"quote": [{
+            "open": [1.10, 1.11, None], "high": [1.12, 1.13, 1.14],
+            "low": [1.09, 1.10, 1.11], "close": [1.11, 1.12, 1.13]}]},
+    }]}}
+    candles = fxdata.parse_yahoo(payload)
+    assert len(candles) == 2                     # third row has a null -> skipped
+    assert candles[0].open == 1.10 and candles[1].close == 1.12
+    assert candles[0].time == 1000
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

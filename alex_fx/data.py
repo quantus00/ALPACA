@@ -1,19 +1,36 @@
-"""Candle data for the forex bot.
+"""Candle data for the forex bot — KEYLESS.
 
-Backtesting: load historical OHLC from a CSV (columns: time,open,high,low,close
-[,volume]; time is a unix seconds int or ISO-8601 string). Get free FX history
-from Dukascopy, HistData.com, Twelve Data, or FOREX.com's own price-history
-endpoint once API access is set up.
+Everything here works with NO API key:
+  * load_csv(path)         — your own downloaded OHLC (Dukascopy/HistData/etc.)
+  * yahoo_candles(pair,tf) — Yahoo Finance chart endpoint (intraday, keyless)
+  * stooq_daily(pair)      — Stooq CSV download (daily, keyless)
+  * get_candles(pair,tf,source) — dispatcher used by backtest + local paper sim
 
-Live / paper: FOREX.com's REST price-history endpoint (see broker.py). Kept
-separate so the backtester runs with zero network / credentials.
+No credentials, no app key. (Real broker order execution is separate — see
+broker.py — but data, backtest, and paper simulation never need a key.)
 """
 from __future__ import annotations
 
 import csv
 import time as _time
 
+import requests
+
 from alex_bot.strategy import Candle
+
+# "EUR/USD" -> Yahoo "EURUSD=X" / Stooq "eurusd".
+_YF_INTERVAL = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+                "1h": "60m", "4h": "60m", "1d": "1d"}
+_YF_RANGE = {"1m": "7d", "5m": "60d", "15m": "60d", "30m": "60d",
+             "1h": "730d", "4h": "730d", "1d": "5y"}
+
+
+def _yahoo_symbol(pair: str) -> str:
+    return pair.replace("/", "").upper() + "=X"
+
+
+def _stooq_symbol(pair: str) -> str:
+    return pair.replace("/", "").lower()
 
 
 def _parse_time(v: str) -> int:
@@ -32,10 +49,13 @@ def _parse_time(v: str) -> int:
 
 def load_csv(path: str) -> list[Candle]:
     """Read OHLC candles from a CSV file (header row auto-detected)."""
-    out: list[Candle] = []
     with open(path, newline="") as f:
-        reader = csv.reader(f)
-        rows = list(reader)
+        return _parse_csv_text(f.read())
+
+
+def _parse_csv_text(text: str) -> list[Candle]:
+    out: list[Candle] = []
+    rows = list(csv.reader(text.splitlines()))
     if not rows:
         return out
     start = 0
@@ -62,6 +82,72 @@ def load_csv(path: str) -> list[Candle]:
                           volume=vol))
     out.sort(key=lambda c: c.time)
     return out
+
+
+def parse_yahoo(payload: dict) -> list[Candle]:
+    """Turn a Yahoo chart JSON payload into candles (keyless, pure)."""
+    result = (payload.get("chart", {}).get("result") or [None])[0]
+    if not result:
+        return []
+    ts = result.get("timestamp") or []
+    q = (result.get("indicators", {}).get("quote") or [{}])[0]
+    o, h, l, c = (q.get("open", []), q.get("high", []), q.get("low", []),
+                  q.get("close", []))
+    out: list[Candle] = []
+    for i, t in enumerate(ts):
+        if None in (o[i], h[i], l[i], c[i]):
+            continue
+        out.append(Candle(time=int(t), open=float(o[i]), high=float(h[i]),
+                          low=float(l[i]), close=float(c[i])))
+    return out
+
+
+def yahoo_candles(pair: str, tf: str, limit: int = 300) -> list[Candle]:
+    """Intraday/daily FX candles from Yahoo Finance — no API key."""
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{_yahoo_symbol(pair)}"
+    params = {"interval": _YF_INTERVAL.get(tf, "15m"),
+              "range": _YF_RANGE.get(tf, "60d")}
+    resp = requests.get(url, params=params, timeout=20,
+                        headers={"User-Agent": "Mozilla/5.0 alex-fx/1.0"})
+    resp.raise_for_status()
+    candles = parse_yahoo(resp.json())
+    if tf == "4h":                              # Yahoo has no 4h; roll 60m -> 4h
+        candles = _resample_4h(candles)
+    return candles[-limit:]
+
+
+def _resample_4h(candles: list[Candle]) -> list[Candle]:
+    out: list[Candle] = []
+    cur: Candle | None = None
+    for c in candles:
+        b = c.time - (c.time % 14400)
+        if cur is None or b != cur.time:
+            if cur is not None:
+                out.append(cur)
+            cur = Candle(b, c.open, c.high, c.low, c.close, c.volume)
+        else:
+            cur.high = max(cur.high, c.high)
+            cur.low = min(cur.low, c.low)
+            cur.close = c.close
+    if cur is not None:
+        out.append(cur)
+    return out
+
+
+def stooq_daily(pair: str, limit: int = 300) -> list[Candle]:
+    """Daily FX candles from Stooq CSV download — no API key."""
+    url = f"https://stooq.com/q/d/l/?s={_stooq_symbol(pair)}&i=d"
+    resp = requests.get(url, timeout=20, headers={"User-Agent": "alex-fx/1.0"})
+    resp.raise_for_status()
+    return _parse_csv_text(resp.text)[-limit:]
+
+
+def get_candles(pair: str, tf: str, source: str = "yahoo",
+                limit: int = 300) -> list[Candle]:
+    """Keyless dispatcher: 'yahoo' (intraday) | 'stooq' (daily)."""
+    if source == "stooq":
+        return stooq_daily(pair, limit)
+    return yahoo_candles(pair, tf, limit)
 
 
 def synthetic_uptrend_with_pullback(pair: str = "EUR/USD") -> list[Candle]:

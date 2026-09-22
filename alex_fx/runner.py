@@ -33,9 +33,17 @@ log = logging.getLogger("alexfx")
 STATE_FILE = os.getenv("ALEXFX_STATE_FILE", "alexfx_state.json")
 
 
+def _fetch_candles(args, tf: str):
+    """Keyless candle source for backtest/paper: demo | csv | yahoo | stooq."""
+    if args.source == "demo":
+        return fxdata.synthetic_uptrend_with_pullback(args.pair)
+    if args.source == "csv":
+        return fxdata.load_csv(args.csv)
+    return fxdata.get_candles(args.pair, tf, args.source)   # yahoo | stooq (keyless)
+
+
 def run_backtest(args, params: Params) -> int:
-    candles = (fxdata.synthetic_uptrend_with_pullback(args.pair) if args.demo
-               else fxdata.load_csv(args.csv))
+    candles = _fetch_candles(args, args.entry_tf)
     if len(candles) < args.warmup + 5:
         print(f"not enough candles ({len(candles)}) — need > {args.warmup + 5}")
         return 1
@@ -70,9 +78,9 @@ def _clear():
         pass
 
 
-def trade_tick(broker, args, params: Params) -> None:
-    structure = broker.price_history(args.pair, args.structure_tf, 300)
-    entry = broker.price_history(args.pair, args.entry_tf, 300)
+def trade_tick(fetch, exec_broker, args, params: Params) -> None:
+    structure = fetch(args.structure_tf)
+    entry = fetch(args.entry_tf)
     sig = evaluate(structure, entry, params)
     pos = _load()
 
@@ -86,7 +94,7 @@ def trade_tick(broker, args, params: Params) -> None:
         if hit_stop or hit_tp or flipped:
             reason = "stop" if hit_stop else "tp" if hit_tp else "flip"
             close = "sell" if side == "buy" else "buy"
-            f = broker.market(args.pair, close, pos["lots"], price)
+            f = exec_broker.market(args.pair, close, pos["lots"], price)
             log.info("EXIT(%s) %s ok=%s %s", reason, args.pair, f.ok,
                      f.error or f.order_id)
             if f.ok:
@@ -99,7 +107,7 @@ def trade_tick(broker, args, params: Params) -> None:
     if sig.action in ("buy", "sell"):
         lots = lots_for_risk(args.pair, args.equity, args.risk, sig.entry, sig.stop)
         lots = max(round(lots, 2), 0.01)
-        f = broker.market(args.pair, sig.action, lots, sig.entry)
+        f = exec_broker.market(args.pair, sig.action, lots, sig.entry)
         log.info("ENTER %s %s %g lots ok=%s %s", sig.action.upper(), args.pair,
                  lots, f.ok, f.error or f.order_id)
         if f.ok:
@@ -110,16 +118,27 @@ def trade_tick(broker, args, params: Params) -> None:
 
 
 def run_forward(args, params: Params, live: bool) -> int:
-    mode = "live" if live else "demo"
-    if live and not args.live:
-        print("refusing live without --live (master arm). Add --live to trade real money.")
-        return 2
-    broker = get_broker(mode)
-    log.info("%s trading %s (entry=%s structure=%s) every %ss",
-             mode.upper(), args.pair, args.entry_tf, args.structure_tf, args.poll)
+    # KEYLESS by default: local simulator with free (Yahoo/Stooq) data.
+    if args.broker == "sim":
+        exec_broker = get_broker("sim")           # SimBroker, no keys, no orders sent
+        fetch = lambda tf: fxdata.get_candles(args.pair, tf, args.source)  # noqa: E731
+        label = "PAPER-SIM (keyless)"
+    else:  # forexcom demo/live (needs FOREX.com creds)
+        mode = "live" if live else "demo"
+        if live and not args.live:
+            print("refusing live without --live (master arm). Add --live to trade real money.")
+            return 2
+        exec_broker = get_broker(mode)
+        fetch = lambda tf: exec_broker.price_history(args.pair, tf, 300)   # noqa: E731
+        label = f"FOREX.com {mode.upper()}"
+
+    if live and args.broker == "sim":
+        print("note: 'live' with --broker sim just simulates locally (no real orders).")
+    log.info("%s trading %s (entry=%s structure=%s, data=%s) every %ss",
+             label, args.pair, args.entry_tf, args.structure_tf, args.source, args.poll)
     while True:
         try:
-            trade_tick(broker, args, params)
+            trade_tick(fetch, exec_broker, args, params)
         except Exception:  # noqa: BLE001
             log.exception("tick failed")
         time.sleep(args.poll)
@@ -139,8 +158,15 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Alex FOREX bot (FOREX.com)")
     p.add_argument("command", choices=["backtest", "paper", "live", "selftest"])
     p.add_argument("--pair", default="EUR/USD")
-    p.add_argument("--csv", help="historical OHLC CSV for backtest")
-    p.add_argument("--demo", action="store_true", help="backtest on synthetic data")
+    p.add_argument("--source", choices=["yahoo", "stooq", "csv", "demo"],
+                   default="yahoo",
+                   help="KEYLESS data source (yahoo intraday / stooq daily), "
+                        "or csv / demo. Default yahoo — no API key.")
+    p.add_argument("--csv", help="historical OHLC CSV (implies --source csv)")
+    p.add_argument("--demo", action="store_true", help="synthetic data (implies --source demo)")
+    p.add_argument("--broker", choices=["sim", "forexcom"], default="sim",
+                   help="paper/live execution: sim = keyless local simulator "
+                        "(default), forexcom = FOREX.com demo/live (needs creds)")
     p.add_argument("--trades", action="store_true", help="print each backtest trade")
     p.add_argument("--spread", type=float, default=1.0, help="modeled spread (pips)")
     p.add_argument("--warmup", type=int, default=60)
@@ -161,14 +187,19 @@ def main(argv=None) -> int:
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # Convenience flags override --source.
+    if args.csv:
+        args.source = "csv"
+    elif args.demo:
+        args.source = "demo"
     if args.command == "selftest":
         return selftest()
     params = Params(pivot_lookback=args.pivot_lookback, aoi_tol_frac=args.aoi_tol,
                     min_touches=args.min_touches, wick_ratio=args.wick_ratio,
                     rr=args.rr)
     if args.command == "backtest":
-        if not args.demo and not args.csv:
-            print("backtest needs --csv <file> or --demo")
+        if args.source == "csv" and not args.csv:
+            print("--source csv needs --csv <file>")
             return 2
         return run_backtest(args, params)
     return run_forward(args, params, live=(args.command == "live"))
