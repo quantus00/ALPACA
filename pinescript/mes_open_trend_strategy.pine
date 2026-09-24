@@ -5,13 +5,13 @@
 // Rules implemented:
 //   1. At 09:30 ET (RTH open), if flat, enter 1 MES contract in the direction
 //      of the confirmed trend  (UPTREND -> long, DOWNTREND -> short).
-//   2. Hold the position until the REVERSAL signal (the trend timeframe flips
-//      against the position) -> close it. This is the profit-taking exit when
-//      the trend runs.
-//   3. STOP-LOSS caps the drawdown case at 12 points = $60 for 1 MES contract
-//      (MES point value = $5). Configurable.
-//   4. On a TREND CHANGE, do not enter at the flip; ARM a pullback entry and
-//      enter only after price pulls back and then resumes in the new direction.
+//   2. On a TREND CHANGE, do not enter at the flip; WAIT and enter only after
+//      price pulls back and then resumes in the new direction (best-results
+//      re-entry).
+//   3. Exit each trade on a fixed bracket: 30-point take-profit / 10-point stop
+//      (MES = $5/point -> +$150 / -$50 per contract, a 3:1 reward:risk).
+//   4. Optionally also exit if the trend flips against the position, so the
+//      opposite-direction pullback entry can take the new trend.
 //
 // Trend = market structure (HH/HL = UP, LH/LL = DOWN; both legs must break to
 // flip), read from the trend timeframe (default 4H).
@@ -38,10 +38,14 @@ openSess     = input.session("0930-1600", "Regular session (ET)", group=grpEntry
 tz           = input.string("America/New_York", "Session timezone", group=grpEntry)
 
 grpRisk   = "Risk / Exit"
-stopPoints = input.float(12.0, "Stop-loss (points)", minval=0.25, step=0.25, group=grpRisk,
-     tooltip="MES = $5 per point. 12 points = $60 per contract.")
+tpPoints   = input.float(30.0, "Take-profit (points)", minval=0.25, step=0.25, group=grpRisk,
+     tooltip="MES = $5 per point. 30 points = $150 per contract.")
+slPoints   = input.float(10.0, "Stop-loss (points)", minval=0.25, step=0.25, group=grpRisk,
+     tooltip="10 points = $50 per contract. Default is a 3:1 (30/10) bracket.")
+exitOnFlip = input.bool(true, "Also exit if the trend flips against the position", group=grpRisk,
+     tooltip="Frees the position so a fresh pullback entry can take the new trend.")
 closeEOD   = input.bool(false, "Also close at session end (16:00 ET)", group=grpRisk,
-     tooltip="Off = hold until the reversal signal, even overnight.")
+     tooltip="Off = hold until TP / SL (or the flip), even overnight.")
 showPnl    = input.bool(true, "Label each trade's $ P&L on chart", group=grpRisk)
 
 // ----------------------------------------------------------------------------- Structure engine
@@ -124,16 +128,21 @@ if usePullback and flat and pbShort
     strategy.entry("Short", strategy.short, qty=contracts)
 
 // ----------------------------------------------------------------------------- Exits
-// Fixed 12-point stop (the drawdown cap).
+// Fixed bracket: 30-point take-profit / 10-point stop (MES: +$150 / -$50).
 if strategy.position_size > 0
-    strategy.exit("L-Stop", from_entry="Long",  stop=strategy.position_avg_price - stopPoints)
+    strategy.exit("L-Bracket", from_entry="Long",
+         limit=strategy.position_avg_price + tpPoints,
+         stop=strategy.position_avg_price - slPoints)
 if strategy.position_size < 0
-    strategy.exit("S-Stop", from_entry="Short", stop=strategy.position_avg_price + stopPoints)
+    strategy.exit("S-Bracket", from_entry="Short",
+         limit=strategy.position_avg_price - tpPoints,
+         stop=strategy.position_avg_price + slPoints)
 
-// Reversal exit (profit-taking when the trend flips against the position).
-if strategy.position_size > 0 and htf == -1
+// Optional: exit early if the trend flips against the position (frees it up for
+// the opposite-direction pullback entry).
+if exitOnFlip and strategy.position_size > 0 and htf == -1
     strategy.close("Long", comment="Reversal")
-if strategy.position_size < 0 and htf == 1
+if exitOnFlip and strategy.position_size < 0 and htf == 1
     strategy.close("Short", comment="Reversal")
 
 // Optional end-of-day flat.
@@ -160,7 +169,8 @@ bgcolor(inRTH ? na : color.new(color.gray, 94))   // shade out-of-session bars
 plotshape(firstBarRTH, title="09:30", style=shape.circle, location=location.bottom,
      color=color.new(color.blue, 40), size=size.tiny)
 
-dollarRisk = stopPoints * syminfo.pointvalue * contracts
+dollarTP = tpPoints * syminfo.pointvalue * contracts
+dollarSL = slPoints * syminfo.pointvalue * contracts
 
 var table info = table.new(position.top_right, 2, 6, border_width=1)
 if barstate.islast
@@ -175,8 +185,8 @@ if barstate.islast
     cell = color.new(color.black, 40)
     table.cell(info, 0, 0, "4H TREND", text_color=color.white, bgcolor=hdr)
     table.cell(info, 1, 0, trendTxt, text_color=color.white, bgcolor=color.new(trendCol, 0))
-    table.cell(info, 0, 1, "Stop", text_color=color.white, bgcolor=hdr)
-    table.cell(info, 1, 1, str.tostring(stopPoints, "#.##") + " pt / $" + str.tostring(dollarRisk, "#.##"), text_color=color.white, bgcolor=cell)
+    table.cell(info, 0, 1, "TP / SL", text_color=color.white, bgcolor=hdr)
+    table.cell(info, 1, 1, str.tostring(tpPoints, "#.##") + "/" + str.tostring(slPoints, "#.##") + " pt · $" + str.tostring(dollarTP, "#.##") + "/$" + str.tostring(dollarSL, "#.##"), text_color=color.white, bgcolor=cell)
     table.cell(info, 0, 2, "Net P&L", text_color=color.white, bgcolor=hdr)
     table.cell(info, 1, 2, "$" + str.tostring(net, "#.##"), text_color=color.white, bgcolor=netc)
     table.cell(info, 0, 3, "Avg / trade", text_color=color.white, bgcolor=hdr)
