@@ -1,0 +1,38 @@
+asset     direction               trd   win%   netR    PF    maxDD$
+-------------------------------------------------------------------
+BTC(D)    structure (baseline)     39  23.1%  -11.1  0.60    -67450
+BTC(D)    momentum N1              64  29.7%   -6.3  0.65    -83366
+BTC(D)    momentum N3              60  38.3%    9.8  0.99    -31643
+BTC(D)    candle                   64  28.1%   -9.3  0.63    -83366
+BTC(D)    thr atr k1 N3            61  34.4%    1.8  0.93    -53390
+BTC(D)    thr pct 1% N3            58  37.9%    8.8  1.00    -28587
+BTC(D)    thr points N3            61  36.1%    5.8  0.94    -37421
+BTC(D)    momentum N1 @2x TF       65  30.8%   -4.3  0.70    -71849
+
+SPY(D)    structure (baseline)     64  45.3%   21.0  1.57       -86
+SPY(D)    momentum N1              83  39.8%   16.1  1.32      -127
+SPY(D)    momentum N3              83  44.6%   28.1  1.46       -64
+SPY(D)    candle                   78  39.7%   15.1  1.43      -126
+SPY(D)    thr atr k1 N3            87  31.0%   -8.2  0.77      -205
+SPY(D)    thr pct 1% N3            87  37.9%   12.1  1.10      -106
+SPY(D)    thr points N3            84  36.9%    9.1  1.05      -110
+SPY(D)    momentum N1 @2x TF       89  37.1%   10.0  0.98      -163
+
+GOLD(60m) structure (baseline)     64  29.7%  -10.2  0.76     -4373
+GOLD(60m) momentum N1              79  39.2%   10.2  1.24     -2115
+GOLD(60m) momentum N3              80  36.2%    3.1  1.05     -3584
+GOLD(60m) candle                   78  39.7%   11.3  1.26     -2115
+GOLD(60m) thr atr k1 N3            72  36.1%    2.4  1.08     -3608
+GOLD(60m) thr pct 1% N3            69  30.4%   -9.5  0.86     -2965
+GOLD(60m) thr points N3            78  30.8%   -9.8  0.86     -4020
+GOLD(60m) momentum N1 @2x TF       74  33.8%   -2.7  0.93     -3869
+
+MES(60m)  structure (baseline)    186  37.1%    9.5  1.00     -3058
+MES(60m)  momentum N1             198  29.8%  -33.9  0.81     -4801
+MES(60m)  momentum N3             194  33.0%  -14.7  0.95     -2375
+MES(60m)  candle                  198  30.8%  -27.8  0.84     -4180
+MES(60m)  thr atr k1 N3           184  30.4%  -27.3  0.84     -3464
+MES(60m)  thr pct 1% N3           172  33.7%   -8.3  0.99     -2259
+MES(60m)  thr points N3           198  31.3%  -24.3  0.86     -3387
+MES(60m)  momentum N1 @2x TF      187  32.6%  -15.7  0.87     -3563
+
