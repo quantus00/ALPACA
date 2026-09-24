@@ -1,0 +1,187 @@
+//@version=5
+// =============================================================================
+// MES Open + Trend + Pullback — BACKTEST STRATEGY (TradingView only)
+// -----------------------------------------------------------------------------
+// Rules implemented:
+//   1. At 09:30 ET (RTH open), if flat, enter 1 MES contract in the direction
+//      of the confirmed trend  (UPTREND -> long, DOWNTREND -> short).
+//   2. Hold the position until the REVERSAL signal (the trend timeframe flips
+//      against the position) -> close it. This is the profit-taking exit when
+//      the trend runs.
+//   3. STOP-LOSS caps the drawdown case at 12 points = $60 for 1 MES contract
+//      (MES point value = $5). Configurable.
+//   4. On a TREND CHANGE, do not enter at the flip; ARM a pullback entry and
+//      enter only after price pulls back and then resumes in the new direction.
+//
+// Trend = market structure (HH/HL = UP, LH/LL = DOWN; both legs must break to
+// flip), read from the trend timeframe (default 4H).
+//
+// Run on an intraday chart (1m / 5m / 15m) so the 09:30 bar and pullbacks are
+// resolved. MES $ P&L is automatic when the chart symbol is MES with 1 contract.
+// =============================================================================
+strategy("MES Open + Trend + Pullback", overlay=true,
+     default_qty_type=strategy.fixed, default_qty_value=1,
+     initial_capital=10000, commission_type=strategy.commission.cash_per_contract,
+     commission_value=0.62, pyramiding=0, calc_on_every_tick=false,
+     process_orders_on_close=true, max_labels_count=500)
+
+// ----------------------------------------------------------------------------- Inputs
+grpStruct = "Trend / Structure"
+pivotLen  = input.int(5, "Pivot lookback (bars each side)", minval=1, group=grpStruct)
+trendTF   = input.timeframe("240", "Trend timeframe", group=grpStruct)
+
+grpEntry  = "Entries"
+contracts    = input.int(1, "MES contracts", minval=1, group=grpEntry)
+useOpenEntry = input.bool(true, "Enter at 09:30 ET open with the trend", group=grpEntry)
+usePullback  = input.bool(true, "Enter pullbacks after a trend change",  group=grpEntry)
+openSess     = input.session("0930-1600", "Regular session (ET)", group=grpEntry)
+tz           = input.string("America/New_York", "Session timezone", group=grpEntry)
+
+grpRisk   = "Risk / Exit"
+stopPoints = input.float(12.0, "Stop-loss (points)", minval=0.25, step=0.25, group=grpRisk,
+     tooltip="MES = $5 per point. 12 points = $60 per contract.")
+closeEOD   = input.bool(false, "Also close at session end (16:00 ET)", group=grpRisk,
+     tooltip="Off = hold until the reversal signal, even overnight.")
+showPnl    = input.bool(true, "Label each trade's $ P&L on chart", group=grpRisk)
+
+// ----------------------------------------------------------------------------- Structure engine
+f_state() =>
+    ph = ta.pivothigh(pivotLen, pivotLen)
+    pl = ta.pivotlow(pivotLen, pivotLen)
+    var float lph = na
+    var float pph = na
+    var float lpl = na
+    var float ppl = na
+    var int   st  = 0
+    if not na(ph)
+        pph := lph
+        lph := ph
+    if not na(pl)
+        ppl := lpl
+        lpl := pl
+    hh = not na(lph) and not na(pph) and lph > pph
+    lh = not na(lph) and not na(pph) and lph < pph
+    hl = not na(lpl) and not na(ppl) and lpl > ppl
+    ll = not na(lpl) and not na(ppl) and lpl < ppl
+    if hh and hl and st != 1
+        st := 1
+    if lh and ll and st != -1
+        st := -1
+    st
+
+htf = request.security(syminfo.tickerid, trendTF, f_state(), lookahead=barmerge.lookahead_off)
+
+// ----------------------------------------------------------------------------- Session helpers
+inRTH        = not na(time(timeframe.period, openSess, tz))
+firstBarRTH  = inRTH and not inRTH[1]           // the 09:30 bar
+sessionEnded = not inRTH and inRTH[1]           // first bar after 16:00
+
+// ----------------------------------------------------------------------------- Pullback state machine
+flipUp   = htf == 1  and htf[1] != 1
+flipDown = htf == -1 and htf[1] != -1
+
+var int  pbDir  = 0        // 0 idle, 1 waiting long pullback, -1 waiting short
+var bool pulled = false    // has price pulled back since the flip?
+
+if flipUp
+    pbDir  := 1
+    pulled := false
+if flipDown
+    pbDir  := -1
+    pulled := false
+
+pbLong  = false
+pbShort = false
+if pbDir == 1
+    if low < low[1]                 // pullback: a lower low against the new uptrend
+        pulled := true
+    if pulled and close > high[1]   // resumption: break back above prior bar high
+        pbLong := true
+        pbDir  := 0
+        pulled := false
+if pbDir == -1
+    if high > high[1]               // pullback against the new downtrend
+        pulled := true
+    if pulled and close < low[1]    // resumption: break below prior bar low
+        pbShort := true
+        pbDir  := 0
+        pulled := false
+
+// ----------------------------------------------------------------------------- Entries
+flat = strategy.position_size == 0
+
+// 1) 09:30 open entry, in the direction of the confirmed trend.
+if useOpenEntry and firstBarRTH and flat
+    if htf == 1
+        strategy.entry("Long", strategy.long, qty=contracts)
+    else if htf == -1
+        strategy.entry("Short", strategy.short, qty=contracts)
+
+// 2) Pullback entries after a trend change.
+if usePullback and flat and pbLong
+    strategy.entry("Long", strategy.long, qty=contracts)
+if usePullback and flat and pbShort
+    strategy.entry("Short", strategy.short, qty=contracts)
+
+// ----------------------------------------------------------------------------- Exits
+// Fixed 12-point stop (the drawdown cap).
+if strategy.position_size > 0
+    strategy.exit("L-Stop", from_entry="Long",  stop=strategy.position_avg_price - stopPoints)
+if strategy.position_size < 0
+    strategy.exit("S-Stop", from_entry="Short", stop=strategy.position_avg_price + stopPoints)
+
+// Reversal exit (profit-taking when the trend flips against the position).
+if strategy.position_size > 0 and htf == -1
+    strategy.close("Long", comment="Reversal")
+if strategy.position_size < 0 and htf == 1
+    strategy.close("Short", comment="Reversal")
+
+// Optional end-of-day flat.
+if closeEOD and sessionEnded and strategy.position_size != 0
+    strategy.close_all(comment="EOD")
+
+// ----------------------------------------------------------------------------- Per-trade $ P&L labels
+var int _seen = 0
+if showPnl and strategy.closedtrades > _seen
+    for i = _seen to strategy.closedtrades - 1
+        p   = strategy.closedtrades.profit(i)
+        xb  = strategy.closedtrades.exit_bar_index(i)
+        xp  = strategy.closedtrades.exit_price(i)
+        col = p >= 0 ? color.new(color.green, 0) : color.new(color.red, 0)
+        label.new(xb, xp, "$" + str.tostring(p, "#.##"),
+             style=p >= 0 ? label.style_label_up : label.style_label_down,
+             color=col, textcolor=color.white, size=size.small)
+    _seen := strategy.closedtrades
+
+// ----------------------------------------------------------------------------- Visuals + summary
+trendTxt = htf == 1 ? "UPTREND" : htf == -1 ? "DOWNTREND" : "NEUTRAL"
+trendCol = htf == 1 ? color.green : htf == -1 ? color.red : color.gray
+bgcolor(inRTH ? na : color.new(color.gray, 94))   // shade out-of-session bars
+plotshape(firstBarRTH, title="09:30", style=shape.circle, location=location.bottom,
+     color=color.new(color.blue, 40), size=size.tiny)
+
+dollarRisk = stopPoints * syminfo.pointvalue * contracts
+
+var table info = table.new(position.top_right, 2, 6, border_width=1)
+if barstate.islast
+    n    = strategy.closedtrades
+    wins = strategy.wintrades
+    wr   = n > 0 ? wins / n * 100 : 0.0
+    net  = strategy.netprofit
+    avg  = n > 0 ? net / n : 0.0
+    pf   = strategy.grossloss != 0 ? strategy.grossprofit / strategy.grossloss : na
+    netc = net >= 0 ? color.new(color.green, 0) : color.new(color.red, 0)
+    hdr  = color.new(color.black, 20)
+    cell = color.new(color.black, 40)
+    table.cell(info, 0, 0, "4H TREND", text_color=color.white, bgcolor=hdr)
+    table.cell(info, 1, 0, trendTxt, text_color=color.white, bgcolor=color.new(trendCol, 0))
+    table.cell(info, 0, 1, "Stop", text_color=color.white, bgcolor=hdr)
+    table.cell(info, 1, 1, str.tostring(stopPoints, "#.##") + " pt / $" + str.tostring(dollarRisk, "#.##"), text_color=color.white, bgcolor=cell)
+    table.cell(info, 0, 2, "Net P&L", text_color=color.white, bgcolor=hdr)
+    table.cell(info, 1, 2, "$" + str.tostring(net, "#.##"), text_color=color.white, bgcolor=netc)
+    table.cell(info, 0, 3, "Avg / trade", text_color=color.white, bgcolor=hdr)
+    table.cell(info, 1, 3, "$" + str.tostring(avg, "#.##"), text_color=color.white, bgcolor=cell)
+    table.cell(info, 0, 4, "Trades / Win%", text_color=color.white, bgcolor=hdr)
+    table.cell(info, 1, 4, str.tostring(n) + " / " + str.tostring(wr, "#.#") + "%", text_color=color.white, bgcolor=cell)
+    table.cell(info, 0, 5, "Profit factor", text_color=color.white, bgcolor=hdr)
+    table.cell(info, 1, 5, na(pf) ? "-" : str.tostring(pf, "#.##"), text_color=color.white, bgcolor=cell)
