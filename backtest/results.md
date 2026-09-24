@@ -18,6 +18,42 @@ contracts) then 60/20, 30/10, 3/1 from the blended average.
 
 ---
 
+## ✅ CHOSEN BEST STRATEGY — hybrid (Pine: `pinescript/mes_best_strategy.pine`)
+
+A single strategy with a **scale-in toggle**:
+
+- **CORE (default, toggle OFF)** — 1 contract, +30 / −10 pt bracket. The robust
+  choice: small drawdowns, consistent, positive/breakeven across every sample.
+- **SCALE-IN (toggle ON)** — enter 1; if price runs **+15 pt**, add **7** (→8),
+  then a **+60 / −20** bracket from the blended average **plus a trend-flip
+  exit**. Higher returns, much bigger swings. Set add = **3** for ~half the
+  drawdown.
+
+Both modes share the entries: 09:30 ET open with the trend + pullback re-entry
+after a 4H trend change (RTH only).
+
+| mode | dataset | trades | win% | net $ | PF | maxDD $ |
+|------|---------|-----:|----:|------:|---:|------:|
+| CORE 1ct 30/10 | CONT60 (8.5mo) | 24 | 25% | −30 | 0.97 | **−569** |
+| CORE 1ct 30/10 | M15 | 15 | 53% | +831 | **3.32** | −154 |
+| CORE 1ct 30/10 | M30 | 27 | 33% | +417 | 1.45 | −261 |
+| SCALE add7@15 60/20 flip | CONT60 | 24 | 17% | **+3,225** | 1.51 | −3,803 |
+| SCALE add7@15 60/20 flip | M15 | 13 | 15% | +423 | 1.10 | −2,635 |
+| SCALE add7@15 60/20 flip | M30 | 24 | 17% | **+3,983** | 1.71 | −2,737 |
+| SCALE add3@15 60/20 flip | CONT60 | 24 | 17% | +1,279 | 1.37 | −2,183 |
+| SCALE add3@15 60/20 flip | M30 | 23 | 17% | +1,684 | 1.54 | −1,471 |
+
+Why this pairing: CORE is the only config with consistently small drawdowns and
+no blow-ups; SCALE add7@15+flip is the only scale-in that was **positive on all
+three samples**. The flip-exit is what makes the scale-in work — it does nothing
+for CORE (the 30/10 bracket fires before any flip). Reproduce with Report 3 of
+`python3 backtest/mes_backtest.py`.
+
+**Not yet validated:** still ~24 trades, pullback-heavy, one instrument/regime,
+modeled fills. Paper-trade before sizing up.
+
+---
+
 ## Report 1 — recent snapshot (MESZ6)
 
 | TF | variant | trades | win% | net $ | avg $ | PF | maxDD $ |

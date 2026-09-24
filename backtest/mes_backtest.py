@@ -499,6 +499,29 @@ def main():
             out_lines += blk
             csv_rows += rows
 
+    # ---------- Report 3: the chosen BEST hybrid strategy ----------------------
+    best = [
+        Variant("BEST_core_1ct_30_10", 30, 10, scale=False),
+        Variant("BEST_scale_add7@15_60_20_flip", 60, 20, scale=True,
+                add_at=15, add_qty=7, flip_exit=True),
+        Variant("BEST_scale_add3@15_60_20_flip", 60, 20, scale=True,
+                add_at=15, add_qty=3, flip_exit=True),
+    ]
+    out_lines += ["=" * 72,
+                  "REPORT 3 — BEST STRATEGY (hybrid): CORE default + SCALE toggle",
+                  "=" * 72]
+    r3 = {"M15": ("MESZ6_M15.json", "MESZ6_M60.json"),
+          "M30": ("MESZ6_M30.json", "MESZ6_M60.json")}
+    if cont:
+        r3["CONT60"] = ("MEScont_M60.json", "MEScont_M60.json")
+    for ds, (ef, tf) in r3.items():
+        bars = load_bars(os.path.join(args.data_dir, ef))
+        trd = Trend(load_bars(os.path.join(args.data_dir, tf)))
+        span = f"{bars[0].et:%Y-%m-%d} -> {bars[-1].et:%Y-%m-%d} ({len(bars)} bars)"
+        blk, rows = run_block(bars, trd, best, f"{ds}  [{span}]")
+        out_lines += blk
+        csv_rows += rows
+
     text = "\n".join(out_lines) + "\n"
     print(text, end="")
     with open(args.out, "w") as f:
