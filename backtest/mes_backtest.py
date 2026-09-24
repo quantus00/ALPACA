@@ -162,14 +162,41 @@ class Variant:
     add_at: float = 20.0
     add_qty: int = 7
     init_sl: float = 10.0
+    flip_exit: bool = False      # close if the 4H trend flips against the position
+    eod_flat: bool = False       # close at 16:00 ET
 
 
-VARIANTS = [
+BASE_VARIANTS = [
     Variant("opt1_30_10", tp=30, sl=10, scale=False),
     Variant("opt2a_60_20", tp=60, sl=20, scale=True),
     Variant("opt2b_30_10", tp=30, sl=10, scale=True),
     Variant("opt2c_3_1", tp=3, sl=1, scale=True),
 ]
+
+# Kept for backward compatibility (old callers import VARIANTS).
+VARIANTS = BASE_VARIANTS
+
+
+def mgmt_variants() -> list[Variant]:
+    """opt2a / opt2b under four exit-management modes."""
+    out = []
+    for base, tp, sl in [("opt2a", 60, 20), ("opt2b", 30, 10)]:
+        out += [
+            Variant(f"{base}_plain", tp, sl, scale=True),
+            Variant(f"{base}_flip", tp, sl, scale=True, flip_exit=True),
+            Variant(f"{base}_eod", tp, sl, scale=True, eod_flat=True),
+            Variant(f"{base}_flip_eod", tp, sl, scale=True, flip_exit=True, eod_flat=True),
+        ]
+    return out
+
+
+def sweep_variants() -> list[Variant]:
+    """Add-trigger sweep for the two live brackets."""
+    out = []
+    for base, tp, sl in [("opt2a", 60, 20), ("opt2b", 30, 10)]:
+        for add in (15, 20, 25):
+            out.append(Variant(f"{base}_add{add}", tp, sl, scale=True, add_at=add))
+    return out
 
 
 @dataclass
@@ -269,6 +296,14 @@ def simulate(bars: list[Bar], trend: Trend, v: Variant) -> list[Trade]:
             if pos is not None:
                 pos["same"] = True   # subsequent bars fully eligible
 
+            # management exits, evaluated at the bar close
+            if pos is not None and v.flip_exit and st == -pos["dir"]:
+                close_pos(pos, b.c, b.start, "flip")
+                pos = None
+            if pos is not None and v.eod_flat and b.et.hour >= 16:
+                close_pos(pos, b.c, b.start, "eod")
+                pos = None
+
         # ---- new entries (only when flat) ----
         if pos is None and in_rth(b.et):
             # 09:30 open entry with the trend
@@ -364,59 +399,110 @@ def export_trades_csv(path: str, rows: list[tuple[str, str, Trade]]) -> None:
                         int(t.scaled), t.reason, f"{t.pnl:.2f}"])
 
 
+def build_continuous_m60(data_dir: str) -> tuple[str, int] | None:
+    """Stitch a continuous front-month M60 series from quarterly contracts.
+    Each contract is used only within its front window (up to its expiry)."""
+    windows = [                       # (contract, lo_exclusive, hi_inclusive)
+        ("MESH6", None, "2026-03-20"),
+        ("MESM6", "2026-03-20", "2026-06-18"),
+        ("MESU6", "2026-06-18", "2026-09-18"),
+        ("MESZ6", "2026-09-18", None),
+    ]
+    rows = []
+    have = 0
+    for c, lo, hi in windows:
+        path = os.path.join(data_dir, f"{c}_M60.json")
+        if not os.path.exists(path):
+            continue
+        have += 1
+        for r in json.load(open(path))[0]["result"]:
+            day = r["time"][:10]
+            if lo and day <= lo:
+                continue
+            if hi and day > hi:
+                continue
+            rows.append(r)
+    if have < 2:
+        return None
+    rows.sort(key=lambda r: r["time"])
+    out = os.path.join(data_dir, "MEScont_M60.json")
+    json.dump([{"result": rows}], open(out, "w"))
+    return out, len(rows)
+
+
+def run_block(bars, trend, variants, title):
+    """Return (text_lines, csv_rows) for one labelled block of variants."""
+    header = (f"{'variant':<15} {'trades':>6} {'scaled':>6} {'win%':>6} "
+              f"{'net$':>10} {'avg$':>8} {'PF':>6} {'maxDD$':>10}")
+    lines = [title, header, "-" * len(header)]
+    csv_rows = []
+    for v in variants:
+        trades = simulate(bars, trend, v)
+        csv_rows += [(title.split()[0], v.name, t) for t in trades]
+        s = stats(trades)
+        pf = "inf" if s["pf"] == float("inf") else f"{s['pf']:.2f}"
+        lines.append(f"{v.name:<15} {s['trades']:>6} {s['scaled']:>6} "
+                     f"{s['win%']:>5.1f}% {s['net']:>10.2f} {s['avg']:>8.2f} "
+                     f"{pf:>6} {s['maxdd']:>10.2f}")
+    lines.append("")
+    return lines, csv_rows
+
+
 def main():
     import argparse
     p = argparse.ArgumentParser(description="MES open+trend+pullback backtest")
-    p.add_argument("--data-dir", default=os.path.join(HERE, "data"),
-                   help="directory holding MESZ6_<TF>.json bar files")
+    p.add_argument("--data-dir", default=os.path.join(HERE, "data"))
     p.add_argument("--tf", default="M5,M15,M30,M60",
-                   help="comma list of timeframes to run (default all)")
-    p.add_argument("--trend-tf", default="M60",
-                   help="which dataset defines the master 4H trend (deepest wins)")
+                   help="recent-snapshot timeframes")
     p.add_argument("--csv", default="", help="write a per-trade CSV to this path")
-    p.add_argument("--out", default=os.path.join(HERE, "results.txt"),
-                   help="write the summary table to this path")
+    p.add_argument("--out", default=os.path.join(HERE, "results.txt"))
     args = p.parse_args()
 
     all_files = {"M5": "MESZ6_M5.json", "M15": "MESZ6_M15.json",
                  "M30": "MESZ6_M30.json", "M60": "MESZ6_M60.json"}
-    tfs = [t.strip() for t in args.tf.split(",") if t.strip()]
+    out_lines: list[str] = []
+    csv_rows = []
 
-    # Master 4H trend from the deepest available series so trend context is the
-    # same regardless of the entry timeframe's window.
-    trend_file = all_files.get(args.trend_tf, all_files["M60"])
-    master = load_bars(os.path.join(args.data_dir, trend_file))
-    trend = Trend(master)
-
-    lines = [f"# master 4H trend from {args.trend_tf}: "
-             f"{master[0].et:%Y-%m-%d} -> {master[-1].et:%Y-%m-%d}", ""]
-    header = (f"{'TF':<4} {'variant':<13} {'trades':>6} {'scaled':>6} "
-              f"{'win%':>6} {'net$':>10} {'avg$':>8} {'PF':>6} {'maxDD$':>10}")
-    lines += [header, "-" * len(header)]
-    csv_rows: list[tuple[str, str, Trade]] = []
-
-    for tf in tfs:
+    # ---------- Report 1: recent snapshot, base variants -----------------------
+    master = load_bars(os.path.join(args.data_dir, all_files["M60"]))
+    trend_recent = Trend(master)
+    out_lines.append("=" * 72)
+    out_lines.append("REPORT 1 — recent snapshot (single MESZ6 contract), base variants")
+    out_lines.append(f"master 4H trend from M60: {master[0].et:%Y-%m-%d} -> {master[-1].et:%Y-%m-%d}")
+    out_lines.append("=" * 72)
+    for tf in [t.strip() for t in args.tf.split(",") if t.strip()]:
         fn = all_files.get(tf)
         if not fn:
-            lines.append(f"# {tf}: unknown timeframe, skipped")
             continue
         bars = load_bars(os.path.join(args.data_dir, fn))
-        span = f"{bars[0].et:%Y-%m-%d} -> {bars[-1].et:%Y-%m-%d}  ({len(bars)} bars)"
-        lines.append(f"# {tf}: {span}")
-        for v in VARIANTS:
-            trades = simulate(bars, trend, v)
-            csv_rows += [(tf, v.name, t) for t in trades]
-            s = stats(trades)
-            pf = "inf" if s["pf"] == float("inf") else f"{s['pf']:.2f}"
-            lines.append(f"{tf:<4} {v.name:<13} {s['trades']:>6} {s['scaled']:>6} "
-                         f"{s['win%']:>5.1f}% {s['net']:>10.2f} {s['avg']:>8.2f} "
-                         f"{pf:>6} {s['maxdd']:>10.2f}")
-        lines.append("")
+        span = f"{bars[0].et:%Y-%m-%d} -> {bars[-1].et:%Y-%m-%d} ({len(bars)} bars)"
+        blk, rows = run_block(bars, trend_recent, BASE_VARIANTS, f"{tf}  [{span}]")
+        out_lines += blk
+        csv_rows += rows
 
-    out = "\n".join(lines) + "\n"
-    print(out, end="")
+    # ---------- Report 2: extended continuous M60 series -----------------------
+    cont = build_continuous_m60(args.data_dir)
+    if cont:
+        cont_path, ncont = cont
+        cbars = load_bars(cont_path)
+        ctrend = Trend(cbars)
+        span = f"{cbars[0].et:%Y-%m-%d} -> {cbars[-1].et:%Y-%m-%d} ({ncont} bars)"
+        out_lines.append("=" * 72)
+        out_lines.append("REPORT 2 — extended continuous front-month M60 "
+                         "(MESH6+MESM6+MESU6+MESZ6)")
+        out_lines.append(f"span: {span}  (M60 -> pullback entries only; ~3wk roll gaps)")
+        out_lines.append("=" * 72)
+        for label, vs in [("CONT60 base variants", BASE_VARIANTS),
+                          ("CONT60 exit-management (opt2a/opt2b x plain/flip/eod/both)", mgmt_variants()),
+                          ("CONT60 add-trigger sweep (15/20/25 pt)", sweep_variants())]:
+            blk, rows = run_block(cbars, ctrend, vs, label)
+            out_lines += blk
+            csv_rows += rows
+
+    text = "\n".join(out_lines) + "\n"
+    print(text, end="")
     with open(args.out, "w") as f:
-        f.write(out)
+        f.write(text)
     if args.csv:
         export_trades_csv(args.csv, csv_rows)
         print(f"# per-trade CSV -> {args.csv}  ({len(csv_rows)} trades)")
