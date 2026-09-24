@@ -114,7 +114,7 @@ def sim_trend_follower(bars, trend, A, sl_mult=2.0):
     return T
 
 
-def sim_hybrid(bars, trend, A, core_tp=3.0, core_sl=1.0, scale=False,
+def sim_hybrid(bars, trend, A, core_tp=3.0, core_sl=1.5, scale=False,
                add_mult=1.5, add_qty=7, s_tp=6.0, s_sl=2.0, flip=True):
     at = atr(bars); sig = _pullback_signals(bars, trend); pv = A.point_value
     T = []; pos = None

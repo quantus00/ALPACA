@@ -54,3 +54,23 @@ ATR(14) stops, pullback entries, ~1 bp/side cost, no per-asset commission
 modeling; gold/MES are intraday (shorter), BTC/SPY are daily (years). GCZ6 gold
 daily history is thin pre-2026 so gold uses 60m. Small-sample rows (SPY
 trend-follow = 7 trades, gold = 15) are not conclusive.
+
+## Stop tuning (ATR sweep on hybrid_core)
+
+Swept TP and SL in ATR (`scripts` in commit history). Widening the stop from
+1.0 → 1.5 ATR raised win rates and profit factor on the equity assets, but **no
+setting rescued BTC or gold**:
+
+| asset | best TP/SL (ATR) | win% | net R | PF | verdict |
+|-------|------------------|-----:|------:|---:|---------|
+| **SPY** | **3.0 / 1.5** | 45% | +21 | **1.57** | robustly positive across many settings |
+| MES | 2.0 / 1.5 | 47% | +11 | 1.05–1.15 | marginally positive |
+| GOLD | 4.0 / 1.0 | 22% | +0.7 | 1.02 | ~breakeven (small sample) |
+| BTC | 4.0 / 4.0 | 46% | −1.2 | 0.89 | **negative at every setting** |
+
+**Tuned default set in the engine: `core_tp=3.0, core_sl=1.5` (ATR).** BTC's win
+rate improves with wide stops but profit factor never crosses 1.0 — the
+pullback-in-trend approach does not fit crypto. Bottom line unchanged and now
+firmer: **this is an equity-index strategy (SPY, and marginally MES). Do not run
+it on BTC or gold as-is.**
+
