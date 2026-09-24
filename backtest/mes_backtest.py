@@ -350,44 +350,76 @@ def stats(trades: list[Trade]) -> dict:
     }
 
 
-def main():
-    datasets = {
-        "M5": "MESZ6_M5.json",
-        "M15": "MESZ6_M15.json",
-        "M30": "MESZ6_M30.json",
-        "M60": "MESZ6_M60.json",
-    }
-    # One master 4H trend, built from the deepest series (M60 ~10 weeks), so the
-    # trend context is identical regardless of the entry timeframe's window.
-    master = load_bars(os.path.join(HERE, "data", datasets["M60"]))
-    trend = Trend(master)
-    print(f"# master 4H trend from M60: {master[0].et:%Y-%m-%d} -> "
-          f"{master[-1].et:%Y-%m-%d}\n")
+def export_trades_csv(path: str, rows: list[tuple[str, str, Trade]]) -> None:
+    import csv
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["tf", "variant", "dir", "entry_dt_utc", "exit_dt_utc",
+                    "entry_px", "exit_px", "qty_final", "scaled", "reason",
+                    "net_pnl_usd"])
+        for tf, vname, t in rows:
+            w.writerow([tf, vname, "long" if t.dir > 0 else "short",
+                        t.entry_dt.isoformat(), t.exit_dt.isoformat(),
+                        f"{t.entry_px:.2f}", f"{t.exit_px:.2f}", t.qty_final,
+                        int(t.scaled), t.reason, f"{t.pnl:.2f}"])
 
-    lines = []
+
+def main():
+    import argparse
+    p = argparse.ArgumentParser(description="MES open+trend+pullback backtest")
+    p.add_argument("--data-dir", default=os.path.join(HERE, "data"),
+                   help="directory holding MESZ6_<TF>.json bar files")
+    p.add_argument("--tf", default="M5,M15,M30,M60",
+                   help="comma list of timeframes to run (default all)")
+    p.add_argument("--trend-tf", default="M60",
+                   help="which dataset defines the master 4H trend (deepest wins)")
+    p.add_argument("--csv", default="", help="write a per-trade CSV to this path")
+    p.add_argument("--out", default=os.path.join(HERE, "results.txt"),
+                   help="write the summary table to this path")
+    args = p.parse_args()
+
+    all_files = {"M5": "MESZ6_M5.json", "M15": "MESZ6_M15.json",
+                 "M30": "MESZ6_M30.json", "M60": "MESZ6_M60.json"}
+    tfs = [t.strip() for t in args.tf.split(",") if t.strip()]
+
+    # Master 4H trend from the deepest available series so trend context is the
+    # same regardless of the entry timeframe's window.
+    trend_file = all_files.get(args.trend_tf, all_files["M60"])
+    master = load_bars(os.path.join(args.data_dir, trend_file))
+    trend = Trend(master)
+
+    lines = [f"# master 4H trend from {args.trend_tf}: "
+             f"{master[0].et:%Y-%m-%d} -> {master[-1].et:%Y-%m-%d}", ""]
     header = (f"{'TF':<4} {'variant':<13} {'trades':>6} {'scaled':>6} "
               f"{'win%':>6} {'net$':>10} {'avg$':>8} {'PF':>6} {'maxDD$':>10}")
-    print(header)
-    print("-" * len(header))
-    lines += [f"# master 4H trend from M60: {master[0].et:%Y-%m-%d} -> {master[-1].et:%Y-%m-%d}",
-              "", header, "-" * len(header)]
-    for tf, fn in datasets.items():
-        bars = load_bars(os.path.join(HERE, "data", fn))
+    lines += [header, "-" * len(header)]
+    csv_rows: list[tuple[str, str, Trade]] = []
+
+    for tf in tfs:
+        fn = all_files.get(tf)
+        if not fn:
+            lines.append(f"# {tf}: unknown timeframe, skipped")
+            continue
+        bars = load_bars(os.path.join(args.data_dir, fn))
         span = f"{bars[0].et:%Y-%m-%d} -> {bars[-1].et:%Y-%m-%d}  ({len(bars)} bars)"
-        print(f"# {tf}: {span}")
         lines.append(f"# {tf}: {span}")
         for v in VARIANTS:
-            s = stats(simulate(bars, trend, v))
+            trades = simulate(bars, trend, v)
+            csv_rows += [(tf, v.name, t) for t in trades]
+            s = stats(trades)
             pf = "inf" if s["pf"] == float("inf") else f"{s['pf']:.2f}"
-            row = (f"{tf:<4} {v.name:<13} {s['trades']:>6} {s['scaled']:>6} "
-                   f"{s['win%']:>5.1f}% {s['net']:>10.2f} {s['avg']:>8.2f} "
-                   f"{pf:>6} {s['maxdd']:>10.2f}")
-            print(row)
-            lines.append(row)
-        print()
+            lines.append(f"{tf:<4} {v.name:<13} {s['trades']:>6} {s['scaled']:>6} "
+                         f"{s['win%']:>5.1f}% {s['net']:>10.2f} {s['avg']:>8.2f} "
+                         f"{pf:>6} {s['maxdd']:>10.2f}")
         lines.append("")
-    with open(os.path.join(HERE, "results.txt"), "w") as f:
-        f.write("\n".join(lines) + "\n")
+
+    out = "\n".join(lines) + "\n"
+    print(out, end="")
+    with open(args.out, "w") as f:
+        f.write(out)
+    if args.csv:
+        export_trades_csv(args.csv, csv_rows)
+        print(f"# per-trade CSV -> {args.csv}  ({len(csv_rows)} trades)")
 
 
 if __name__ == "__main__":
