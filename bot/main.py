@@ -11,6 +11,9 @@ Modes:
   flatten  -- close every open leg saved from a previous `dual` run.
   status   -- print open legs with their single + combined P/L.
   balances -- print account balances for the given brokers.
+  close-all -- sell EVERY live Coinbase spot position back to USD. Dry-run
+              (prints the plan) unless you pass --yes. Skips dust below the
+              product minimum (use Coinbase Convert for those).
   alex     -- run Alex's market-structure strategy on ANY asset the broker
               supports (free-form symbol + asset class). Crypto on Coinbase or
               Webull; futures on Webull (official OpenAPI). Dry-run unless --live.
@@ -21,6 +24,8 @@ Examples:
                           --size 0.05 --entry-tf 15m --structure-tf 1h --once
   python -m bot.main alex --broker webull --asset futures --symbol MES \\
                           --size 1 --live
+  python -m bot.main close-all                 # dry-run: show what would be sold
+  python -m bot.main close-all --min-usd 1 --yes   # sell all positions >= $1 to USD
   # Backtest (keyless): crypto via Coinbase, futures via Yahoo =F tickers
   python -m bot.main alex --asset crypto  --symbol BTC-USD --backtest --bars 800
   python -m bot.main alex --asset futures --symbol MES --backtest --entry-tf 1h --trades
@@ -191,7 +196,7 @@ def main(argv=None) -> None:
     p = argparse.ArgumentParser(description="Multi-timeframe trend bot")
     p.add_argument("mode",
                    choices=["poll", "webhook", "once", "dual", "flatten",
-                            "status", "balances", "alex"])
+                            "status", "balances", "alex", "close-all"])
     p.add_argument("--broker", choices=[b.value for b in Broker])
     p.add_argument("--instrument", choices=[i.value for i in Instrument])
     p.add_argument("--size", type=float, help="contract-size toggle")
@@ -216,6 +221,13 @@ def main(argv=None) -> None:
                    help="alex --backtest: bars skipped before the first trade")
     p.add_argument("--trades", action="store_true",
                    help="alex --backtest: print each closed trade")
+    # close-all: flatten every live spot position back to USD.
+    p.add_argument("--yes", action="store_true",
+                   help="close-all: actually place the SELL orders (else dry-run)")
+    p.add_argument("--min-usd", dest="min_usd", type=float, default=0.0,
+                   help="close-all: skip positions worth less than this many USD")
+    p.add_argument("--only", help="close-all: comma-separated currencies to close "
+                                  "(e.g. SPX,LOKA,ROSE); default = all")
     p.add_argument("--pivot-lookback", dest="pivot_lookback", type=int, default=3)
     p.add_argument("--aoi-tol", dest="aoi_tol", type=float, default=0.0015)
     p.add_argument("--min-touches", dest="min_touches", type=int, default=3)
@@ -264,6 +276,10 @@ def main(argv=None) -> None:
         _run_balances(cfg, args)
     elif args.mode == "alex":
         _run_alex(cfg, args)
+    elif args.mode == "close-all":
+        from . import close_all as ca
+        ca.plan_and_close(cfg, execute=args.yes, min_usd=args.min_usd,
+                          only=(args.only.split(",") if args.only else None))
     else:
         _run_once(cfg)
 
