@@ -192,6 +192,26 @@ Stop is placed beyond the area-of-interest, take-profit at the R:R (default
 2:1). Set `ALEX_EQUITY` + `ALEX_RISK` for risk-based position sizing; otherwise
 `--size` is used as-is. Everything is dry-run until `--live`.
 
+**Backtest** the same engine on history — keyless, no broker calls:
+
+```bash
+# Crypto (Coinbase public candles). BTC perp / nano perp track BTC-USD spot,
+# so all three backtest on the same series:
+python -m bot.main alex --asset crypto --symbol BTC-USD --backtest --bars 800
+
+# Futures (Yahoo continuous-contract =F tickers): MES, ES, MGC/GC (gold), ...
+python -m bot.main alex --asset futures --symbol MES --backtest --entry-tf 1h --trades
+python -m bot.main alex --asset futures --symbol MGC --backtest --entry-tf 1h
+
+# Your own OHLC file:
+python -m bot.main alex --asset crypto --symbol BTC-USD --backtest --csv btc_1h.csv
+```
+
+Reports win rate, total R, profit factor, max drawdown, and estimated $ P/L
+(using the contract multiplier — MES ×5, gold ×10/×100). Needs outbound
+internet to the data host, so run it on your droplet/PC (not in a locked-down
+sandbox).
+
 ---
 
 ## 3. How the trend logic works

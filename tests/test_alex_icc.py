@@ -175,6 +175,44 @@ def test_trade_tick_enters_then_takes_profit(tmp_path, monkeypatch):
     assert not state.exists()
 
 
+# -- backtest ----------------------------------------------------------------
+def test_yahoo_futures_symbol_mapping():
+    from bot import backtest as bt
+    assert bt.yahoo_futures_symbol("MES") == "MES=F"
+    assert bt.yahoo_futures_symbol("MESU5") == "MES=F"     # contract suffix
+    assert bt.yahoo_futures_symbol("MGCZ5") == "MGC=F"     # gold micro
+    assert bt.yahoo_futures_symbol("GC") == "GC=F"
+    assert bt.yahoo_futures_symbol("ZZ") == "ZZ=F"         # unknown -> <SYM>=F
+
+
+def test_backtest_runs_and_reports_dollars(monkeypatch):
+    from bot import backtest as bt
+    from alex_fx.data import synthetic_uptrend_with_pullback
+    candles = synthetic_uptrend_with_pullback("MES")
+    monkeypatch.setattr(bt, "fetch_candles", lambda *a, **k: candles)
+    c = _cfg(Broker.WEBULL, AssetClass.FUTURES, "MES", size=1.0)
+    res = bt.run_backtest(c, Params(pivot_lookback=1, aoi_tol_frac=0.03),
+                          "15m", warmup=6)
+    assert len(res.closed) >= 1
+    # dollar P/L uses the futures multiplier (MES = 5.0)
+    dollars = bt._dollar_pnl(res, size=1.0, multiplier=5.0)
+    assert dollars > 0                                     # synthetic series wins
+
+
+def test_backtest_fetch_routes_crypto_perp_to_spot(monkeypatch):
+    from bot import backtest as bt
+    seen = {}
+
+    def fake_cb(symbol, tf, bars):
+        seen["symbol"] = symbol
+        return []
+    monkeypatch.setattr("alex_bot.data.coinbase_candles", fake_cb)
+    c = _cfg(Broker.COINBASE, AssetClass.CRYPTO, "BTC-PERP-INTX", size=0.01)
+    bt.fetch_candles(c, "1h", bars=10)
+    # coinbase_candles itself maps the perp to BTC-USD; we pass the symbol through
+    assert seen["symbol"] == "BTC-PERP-INTX"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

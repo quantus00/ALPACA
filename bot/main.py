@@ -21,6 +21,9 @@ Examples:
                           --size 0.05 --entry-tf 15m --structure-tf 1h --once
   python -m bot.main alex --broker webull --asset futures --symbol MES \\
                           --size 1 --live
+  # Backtest (keyless): crypto via Coinbase, futures via Yahoo =F tickers
+  python -m bot.main alex --asset crypto  --symbol BTC-USD --backtest --bars 800
+  python -m bot.main alex --asset futures --symbol MES --backtest --entry-tf 1h --trades
   python -m bot.main dual --leg coinbase:btc_usd_spot:0.01 \\
                           --leg webull:spy_options:1 --tp 2 --sl 1 --live
   python -m bot.main flatten
@@ -81,7 +84,13 @@ def _run_alex(cfg: Config, args) -> None:
     if args.structure_tf:
         os.environ["ALEX_STRUCTURE_TF"] = args.structure_tf
     params = alex_mod.params_from(args)
-    if args.once:
+    if args.backtest:
+        from . import backtest as bt_mod
+        tf = args.entry_tf or "15m"
+        bt_mod.run_backtest(cfg, params, tf, source=args.source or "auto",
+                            csv=args.csv, bars=args.bars, warmup=args.warmup,
+                            show_trades=args.trades)
+    elif args.once:
         alex_mod.analyze(cfg, params)
     else:
         alex_mod.run_loop(cfg, params)
@@ -196,6 +205,17 @@ def main(argv=None) -> None:
                    help="alex: higher timeframe for market structure")
     p.add_argument("--once", action="store_true",
                    help="alex: evaluate a single tick and print, don't loop")
+    p.add_argument("--backtest", action="store_true",
+                   help="alex: backtest the strategy on historical candles")
+    p.add_argument("--source", choices=["auto", "coinbase", "yahoo", "csv"],
+                   help="alex --backtest: data source (default: auto by asset)")
+    p.add_argument("--csv", help="alex --backtest: OHLC csv file (implies --source csv)")
+    p.add_argument("--bars", type=int, default=500,
+                   help="alex --backtest: how many candles to pull (default 500)")
+    p.add_argument("--warmup", type=int, default=60,
+                   help="alex --backtest: bars skipped before the first trade")
+    p.add_argument("--trades", action="store_true",
+                   help="alex --backtest: print each closed trade")
     p.add_argument("--pivot-lookback", dest="pivot_lookback", type=int, default=3)
     p.add_argument("--aoi-tol", dest="aoi_tol", type=float, default=0.0015)
     p.add_argument("--min-touches", dest="min_touches", type=int, default=3)
