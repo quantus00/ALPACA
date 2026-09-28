@@ -164,6 +164,34 @@ to `BOT_STATE_FILE` so `flatten` / `status` work even after a restart. Leave
 every toggle at `0` (the default) and `dual` just opens the legs and leaves them
 open.
 
+### Alex strategy: trade ANY asset on Webull & Coinbase
+
+The `alex` mode runs Alex's market-structure method (trend → area-of-interest →
+rejection/engulfing entry, from the tested `alex_bot.strategy` engine) on a
+**free-form symbol** — not just the four fixed instruments. It routes through
+the same ICC broker layer, so it reuses all the existing plumbing.
+
+* **Coinbase** — every spot pair (`BTC-USD`, `ETH-USD`, `SOL-USD`, …).
+* **Webull** — crypto and futures via the **official Webull OpenAPI**
+  (`WEBULL_BACKEND=openapi`, the default). Set `WEBULL_APP_KEY`,
+  `WEBULL_APP_SECRET`, `WEBULL_ACCOUNT_ID`, `WEBULL_REGION`.
+
+```bash
+# Analyze one tick (prints trend + signal + sizing), no orders:
+python -m bot.main alex --broker coinbase --asset crypto --symbol ETH-USD \
+    --size 0.05 --entry-tf 15m --structure-tf 1h --once
+
+# Paper loop (dry-run, default): manages stop / take-profit / trend-flip exits
+python -m bot.main alex --broker coinbase --asset crypto --symbol SOL-USD --size 1
+
+# LIVE Webull futures (real orders) — must pass --live to arm:
+python -m bot.main alex --broker webull --asset futures --symbol MES --size 1 --live
+```
+
+Stop is placed beyond the area-of-interest, take-profit at the R:R (default
+2:1). Set `ALEX_EQUITY` + `ALEX_RISK` for risk-based position sizing; otherwise
+`--size` is used as-is. Everything is dry-run until `--live`.
+
 ---
 
 ## 3. How the trend logic works

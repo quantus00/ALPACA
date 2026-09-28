@@ -13,7 +13,7 @@ import uuid
 
 import requests
 
-from ..config import Config, Instrument
+from ..config import AssetClass, Config, Instrument
 from .base import BrokerBase, OrderResult
 
 log = logging.getLogger(__name__)
@@ -24,6 +24,8 @@ _PRICE_PRODUCT = {"BTC-PERP-INTX": "BTC-USD"}
 
 class CoinbaseBroker(BrokerBase):
     supported = (Instrument.BTC_USD_SPOT, Instrument.BTC_NANO_PERP)
+    # Free-symbol (Alex) mode: any Coinbase spot pair (BTC-USD, ETH-USD, ...).
+    supported_assets = (AssetClass.CRYPTO,)
 
     def __init__(self, cfg: Config) -> None:
         super().__init__(cfg)
@@ -97,7 +99,7 @@ class CoinbaseBroker(BrokerBase):
                            size=size, order_id=oid, fill_price=fill, raw=data)
 
     def place_order(self, side: str, size: float) -> OrderResult:
-        self._guard(self.cfg.instrument)
+        self._guard()
         symbol = self.cfg.symbol()
 
         if self.cfg.dry_run:
@@ -117,7 +119,7 @@ class CoinbaseBroker(BrokerBase):
     def flatten(self, side: str | None = None, size: float | None = None,
                 symbol: str | None = None, meta: dict | None = None) -> OrderResult:
         """Close a spot/perp position by sending the offsetting market order."""
-        self._guard(self.cfg.instrument)
+        self._guard()
         sym = symbol or self.cfg.symbol()
         close_side = "sell" if (side or "buy") == "buy" else "buy"
         qty = size if size is not None else self.cfg.contract_size

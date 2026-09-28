@@ -25,6 +25,29 @@ class Instrument(str, Enum):
     MES_FUTURES = "mes_futures"       # Tradovate Micro E-mini S&P 500
 
 
+class AssetClass(str, Enum):
+    """Free-form asset classes for the Alex strategy path (``bot.main alex``).
+
+    Unlike :class:`Instrument` (a fixed set of hand-wired products), an asset
+    class + a free-form symbol lets the bot trade *any* asset the broker
+    supports (all Coinbase spot pairs, any Webull futures/crypto), which is what
+    the Alex market-structure bot needs.
+    """
+    CRYPTO = "crypto"
+    FUTURES = "futures"
+    STOCK = "stock"
+    OPTION = "option"
+
+
+# In free-symbol (Alex) mode, which brokers may trade each asset class.
+ASSET_BROKERS: dict[AssetClass, tuple[Broker, ...]] = {
+    AssetClass.CRYPTO: (Broker.COINBASE, Broker.WEBULL),
+    AssetClass.FUTURES: (Broker.WEBULL, Broker.TRADOVATE),
+    AssetClass.STOCK: (Broker.WEBULL, Broker.ALPACA),
+    AssetClass.OPTION: (Broker.WEBULL, Broker.ALPACA),
+}
+
+
 # Which brokers can trade which instrument. Used to validate the toggles.
 INSTRUMENT_BROKERS: dict[Instrument, tuple[Broker, ...]] = {
     Instrument.BTC_USD_SPOT: (Broker.COINBASE,),
@@ -50,9 +73,32 @@ INSTRUMENT_MULTIPLIER: dict[Instrument, float] = {
     Instrument.MES_FUTURES: 5.0,
 }
 
+# Point value ($ per 1.0 price move per contract) for common Webull micro/mini
+# futures roots, used to weight futures P/L in free-symbol (Alex) mode. Unknown
+# roots fall back to 1.0. Matched by the leading letters of the symbol root.
+_FUTURES_MULTIPLIER: dict[str, float] = {
+    "MES": 5.0, "ES": 50.0,       # Micro / E-mini S&P 500
+    "MNQ": 2.0, "NQ": 20.0,       # Micro / E-mini Nasdaq-100
+    "M2K": 5.0, "RTY": 50.0,      # Micro / E-mini Russell 2000
+    "MYM": 0.5, "YM": 5.0,        # Micro / E-mini Dow
+    "MGC": 10.0, "GC": 100.0,     # Micro / full Gold
+    "MCL": 100.0, "CL": 1000.0,   # Micro / full Crude Oil
+    "MBT": 0.1, "BTC": 5.0,       # Micro / Bitcoin futures
+}
+
 
 def _env_bool(name: str, default: bool = False) -> bool:
     return os.getenv(name, str(default)).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_asset_class() -> "AssetClass | None":
+    raw = os.getenv("BOT_ASSET_CLASS", "").strip().lower()
+    if not raw:
+        return None
+    try:
+        return AssetClass(raw)
+    except ValueError:
+        return None
 
 
 @dataclass
@@ -60,6 +106,16 @@ class Config:
     # ---- Primary toggles -----------------------------------------------------
     broker: Broker = Broker(os.getenv("BOT_BROKER", "coinbase"))
     instrument: Instrument = Instrument(os.getenv("BOT_INSTRUMENT", "btc_usd_spot"))
+
+    # ---- Free-symbol (Alex strategy) mode -----------------------------------
+    # When ``symbol_override`` and ``asset_class`` are both set, the bot trades
+    # that free-form symbol in that asset class instead of the fixed Instrument
+    # enum above. This is how ``bot.main alex`` trades any asset the broker has.
+    symbol_override: str = os.getenv("BOT_SYMBOL", "")
+    asset_class: "AssetClass | None" = field(default_factory=_env_asset_class)
+    # Which Webull integration the factory builds: "openapi" (official Webull
+    # OpenAPI SDK; crypto/futures/stock) or "community" (unofficial webull pip).
+    webull_backend: str = os.getenv("WEBULL_BACKEND", "openapi")
 
     # Contract / order size toggle. Meaning depends on the instrument:
     #   - crypto spot/perp : base-asset quantity (e.g. 0.01 BTC)
@@ -110,10 +166,42 @@ class Config:
     window1_title: str = os.getenv("BOT_WINDOW_1_TITLE", "Chart")
     window2_title: str = os.getenv("BOT_WINDOW_2_TITLE", "Broker")
 
+    def free_mode(self) -> bool:
+        """True when trading a free-form symbol/asset (the Alex path) rather
+        than one of the fixed :class:`Instrument` products."""
+        return bool(self.symbol_override) and self.asset_class is not None
+
     def symbol(self) -> str:
+        if self.symbol_override:
+            return self.symbol_override
         return INSTRUMENT_SYMBOLS[self.instrument]
 
+    def multiplier(self) -> float:
+        """Dollar-P/L weight for the current position (used by the P/L math)."""
+        if self.free_mode():
+            # Crypto/stock are 1:1; futures use a per-contract point value keyed
+            # by the symbol's root (longest matching prefix wins, e.g. "MESU5" ->
+            # "MES"). Unknown roots default to 1.0.
+            if self.asset_class == AssetClass.FUTURES:
+                sym = self.symbol().upper()
+                for root in sorted(_FUTURES_MULTIPLIER, key=len, reverse=True):
+                    if sym.startswith(root):
+                        return _FUTURES_MULTIPLIER[root]
+            return 1.0
+        return INSTRUMENT_MULTIPLIER[self.instrument]
+
     def validate(self) -> None:
+        if self.free_mode():
+            allowed = ASSET_BROKERS.get(self.asset_class, ())
+            if self.broker not in allowed:
+                names = ", ".join(b.value for b in allowed) or "(none)"
+                raise ValueError(
+                    f"Asset class {self.asset_class.value!r} cannot be traded on "
+                    f"broker {self.broker.value!r}. Allowed brokers: {names}."
+                )
+            if self.contract_size <= 0:
+                raise ValueError("contract_size must be > 0")
+            return
         allowed = INSTRUMENT_BROKERS[self.instrument]
         if self.broker not in allowed:
             names = ", ".join(b.value for b in allowed)
@@ -125,6 +213,12 @@ class Config:
             raise ValueError("contract_size must be > 0")
 
     def describe(self) -> str:
+        if self.free_mode():
+            return (
+                f"broker={self.broker.value} asset={self.asset_class.value} "
+                f"symbol={self.symbol()} size={self.contract_size} "
+                f"dry_run={self.dry_run}"
+            )
         return (
             f"broker={self.broker.value} instrument={self.instrument.value} "
             f"symbol={self.symbol()} size={self.contract_size} "

@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
-from ..config import Config, Instrument
+from ..config import AssetClass, Config, Instrument
 
 
 @dataclass
@@ -25,8 +25,10 @@ class OrderResult:
 
 
 class BrokerBase(ABC):
-    #: instruments this broker is allowed to trade
+    #: instruments this broker is allowed to trade (fixed-Instrument mode)
     supported: tuple[Instrument, ...] = ()
+    #: asset classes this broker can trade in free-symbol (Alex) mode
+    supported_assets: tuple[AssetClass, ...] = ()
 
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
@@ -34,10 +36,26 @@ class BrokerBase(ABC):
     def supports(self, instrument: Instrument) -> bool:
         return instrument in self.supported
 
-    def _guard(self, instrument: Instrument) -> None:
-        if not self.supports(instrument):
+    def supports_cfg(self) -> bool:
+        """Whether this broker can trade what ``cfg`` currently selects, in
+        whichever mode (free-symbol asset class, or fixed Instrument)."""
+        if self.cfg.free_mode():
+            return self.cfg.asset_class in self.supported_assets
+        return self.supports(self.cfg.instrument)
+
+    def _guard(self, instrument: Instrument | None = None) -> None:
+        if self.cfg.free_mode():
+            if self.cfg.asset_class not in self.supported_assets:
+                allowed = ", ".join(a.value for a in self.supported_assets) or "(none)"
+                raise ValueError(
+                    f"{self.__class__.__name__} does not trade "
+                    f"{self.cfg.asset_class.value} (supports: {allowed})"
+                )
+            return
+        inst = instrument if instrument is not None else self.cfg.instrument
+        if not self.supports(inst):
             raise ValueError(
-                f"{self.__class__.__name__} does not support {instrument.value}"
+                f"{self.__class__.__name__} does not support {inst.value}"
             )
 
     @abstractmethod

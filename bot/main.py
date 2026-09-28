@@ -11,9 +11,16 @@ Modes:
   flatten  -- close every open leg saved from a previous `dual` run.
   status   -- print open legs with their single + combined P/L.
   balances -- print account balances for the given brokers.
+  alex     -- run Alex's market-structure strategy on ANY asset the broker
+              supports (free-form symbol + asset class). Crypto on Coinbase or
+              Webull; futures on Webull (official OpenAPI). Dry-run unless --live.
 
 Examples:
   python -m bot.main poll --broker coinbase --instrument btc_usd_spot --size 0.01
+  python -m bot.main alex --broker coinbase --asset crypto --symbol ETH-USD \\
+                          --size 0.05 --entry-tf 15m --structure-tf 1h --once
+  python -m bot.main alex --broker webull --asset futures --symbol MES \\
+                          --size 1 --live
   python -m bot.main dual --leg coinbase:btc_usd_spot:0.01 \\
                           --leg webull:spy_options:1 --tp 2 --sl 1 --live
   python -m bot.main flatten
@@ -23,11 +30,12 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import time
 
 from . import dual as dual_mod
 from .brokers import get_broker
-from .config import Broker, Config, Instrument
+from .config import AssetClass, Broker, Config, Instrument
 from .notifier import Notifier
 from .portfolio import load_state
 from .strategy import StrategyRunner
@@ -50,9 +58,33 @@ def _build_config(args, validate: bool = True) -> Config:
             setattr(cfg, f"{name}_pct", val)
     if getattr(args, "flatten_mode", None) is not None:
         cfg.flatten_mode = args.flatten_mode
+    # Free-symbol (Alex) mode: a free-form symbol + asset class.
+    if getattr(args, "symbol", None):
+        cfg.symbol_override = args.symbol
+    if getattr(args, "asset", None):
+        cfg.asset_class = AssetClass(args.asset)
     if validate:
         cfg.validate()
     return cfg
+
+
+def _run_alex(cfg: Config, args) -> None:
+    if not cfg.free_mode():
+        raise SystemExit(
+            "alex mode needs --symbol and --asset, e.g.\n"
+            "  python -m bot.main alex --broker coinbase --asset crypto "
+            "--symbol ETH-USD --size 0.05 --once")
+    from . import alex as alex_mod
+    # Timeframes reach the Alex runner via env (the app is env-configurable).
+    if args.entry_tf:
+        os.environ["ALEX_ENTRY_TF"] = args.entry_tf
+    if args.structure_tf:
+        os.environ["ALEX_STRUCTURE_TF"] = args.structure_tf
+    params = alex_mod.params_from(args)
+    if args.once:
+        alex_mod.analyze(cfg, params)
+    else:
+        alex_mod.run_loop(cfg, params)
 
 
 def _run_poll(cfg: Config) -> None:
@@ -150,10 +182,25 @@ def main(argv=None) -> None:
     p = argparse.ArgumentParser(description="Multi-timeframe trend bot")
     p.add_argument("mode",
                    choices=["poll", "webhook", "once", "dual", "flatten",
-                            "status", "balances"])
+                            "status", "balances", "alex"])
     p.add_argument("--broker", choices=[b.value for b in Broker])
     p.add_argument("--instrument", choices=[i.value for i in Instrument])
     p.add_argument("--size", type=float, help="contract-size toggle")
+    # Alex strategy mode: free-form symbol + asset class (crypto/futures).
+    p.add_argument("--symbol", help="alex: any symbol the broker trades "
+                                    "(e.g. BTC-USD, ETH-USD, MES)")
+    p.add_argument("--asset", choices=[a.value for a in AssetClass],
+                   help="alex: asset class for --symbol (crypto|futures)")
+    p.add_argument("--entry-tf", dest="entry_tf", help="alex: entry timeframe")
+    p.add_argument("--structure-tf", dest="structure_tf",
+                   help="alex: higher timeframe for market structure")
+    p.add_argument("--once", action="store_true",
+                   help="alex: evaluate a single tick and print, don't loop")
+    p.add_argument("--pivot-lookback", dest="pivot_lookback", type=int, default=3)
+    p.add_argument("--aoi-tol", dest="aoi_tol", type=float, default=0.0015)
+    p.add_argument("--min-touches", dest="min_touches", type=int, default=3)
+    p.add_argument("--wick-ratio", dest="wick_ratio", type=float, default=1.5)
+    p.add_argument("--rr", type=float, default=2.0)
     p.add_argument("--live", dest="dry_run", action="store_false", default=None,
                    help="place REAL orders (default is dry-run)")
     p.add_argument("--dry-run", dest="dry_run", action="store_true", default=None)
@@ -175,8 +222,9 @@ def main(argv=None) -> None:
     args = p.parse_args(argv)
 
     # Single-broker modes validate the base broker/instrument pairing; the
-    # multi-leg modes validate each leg on its own.
-    needs_base_validate = args.mode in ("poll", "webhook", "once")
+    # multi-leg modes validate each leg on its own. Alex validates its own
+    # free-symbol/asset pairing inside _build_config.
+    needs_base_validate = args.mode in ("poll", "webhook", "once", "alex")
     cfg = _build_config(args, validate=needs_base_validate)
     logging.basicConfig(level=getattr(logging, cfg.log_level.upper(), logging.INFO),
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -194,6 +242,8 @@ def main(argv=None) -> None:
         _run_status(cfg)
     elif args.mode == "balances":
         _run_balances(cfg, args)
+    elif args.mode == "alex":
+        _run_alex(cfg, args)
     else:
         _run_once(cfg)
 

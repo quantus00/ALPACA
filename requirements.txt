@@ -3,7 +3,10 @@ requests>=2.31
 flask>=3.0
 
 # Broker SDKs (install only what you need for your chosen broker)
-coinbase-advanced-py>=1.2   # Coinbase: BTC/USD spot + nano perp
+coinbase-advanced-py>=1.2   # Coinbase: BTC/USD spot + nano perp + any spot pair
 # alpaca-py>=0.20           # optional; REST is used directly for Alpaca options
 # webull>=0.6               # Webull: SPY options (community, unofficial)
+# webull-python-sdk-core    # Webull OpenAPI (official): auth/client
+# webull-python-sdk-trade   # Webull OpenAPI (official): orders — crypto + futures
+# webull-python-sdk-mdata   # Webull OpenAPI (official): market data (futures candles)
 # tradovate uses plain REST (requests) — no SDK required
