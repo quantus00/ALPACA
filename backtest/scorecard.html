@@ -1,0 +1,158 @@
+<title>Backtest Scorecard</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&display=swap">
+<meta name="description" content="How the trend/pullback strategy scored across BTC, SPY, gold and MES — structure vs point-movement direction, plus today's session.">
+<style>
+  /* Layout: a stack of chart cards under a headline finding; grouped bars, breakeven baseline. */
+  :root{
+    --bg:#f7f6f3; --surface:#fcfcfb; --line:#e6e3dc; --ink:#232019; --ink-2:#5c574c; --muted:#8a8377;
+    --struct:#2f6fdd; --pm:#e08a12; --good:#1f9d61; --bad:#d1483a; --grid:#eceae3;
+    --font:"Archivo",system-ui,sans-serif; --body:system-ui,-apple-system,"Segoe UI",sans-serif;
+    color-scheme:light;
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --bg:#16150f; --surface:#1e1c15; --line:#33302a; --ink:#f0ede4; --ink-2:#b9b3a5; --muted:#8b8577;
+    --struct:#6ea2ff; --pm:#f0a83c; --good:#3fca86; --bad:#f0705f; --grid:#28261f; color-scheme:dark;
+  }}
+  :root[data-theme="dark"]{
+    --bg:#16150f; --surface:#1e1c15; --line:#33302a; --ink:#f0ede4; --ink-2:#b9b3a5; --muted:#8b8577;
+    --struct:#6ea2ff; --pm:#f0a83c; --good:#3fca86; --bad:#f0705f; --grid:#28261f; color-scheme:dark;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--ink);font-family:var(--body);line-height:1.5;
+    font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:840px;margin:0 auto;padding-block:32px;padding-inline:20px}
+  h1{font-family:var(--font);font-weight:700;font-size:clamp(1.5rem,4vw,2.1rem);margin:0 0 6px;
+    letter-spacing:-.02em;text-wrap:balance}
+  .sub{color:var(--ink-2);font-size:.95rem;margin:0 0 24px;max-width:60ch}
+  .finding{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--pm);
+    border-radius:10px;padding:16px 18px;margin-bottom:26px}
+  .finding b{color:var(--ink)}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;
+    padding:18px 18px 14px;margin-bottom:22px}
+  .card h2{font-family:var(--font);font-weight:600;font-size:1.06rem;margin:0 0 2px;letter-spacing:-.01em}
+  .card .note{color:var(--ink-2);font-size:.86rem;margin:0 0 12px}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin:0 0 6px;font-size:.82rem;color:var(--ink-2)}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  .swatch{width:11px;height:11px;border-radius:3px;display:inline-block}
+  svg{display:block;width:100%;height:auto;overflow:visible}
+  .cap{color:var(--muted);font-size:.8rem;margin:10px 2px 0}
+  .foot{color:var(--muted);font-size:.78rem;margin-top:8px;line-height:1.55}
+  .foot b{color:var(--ink-2)}
+  .pos{color:var(--good)} .neg{color:var(--bad)}
+</style>
+
+<div class="wrap">
+  <h1>Backtest Scorecard</h1>
+  <p class="sub">A trend + pullback strategy (fixed ATR stop/target) scored across four markets, and how it changes when direction comes from swing <em>structure</em> versus raw <em>point‑movement</em>.</p>
+
+  <div class="finding">
+    <b>The one finding:</b> point‑movement direction rescues the volatile markets. It turns
+    <b>BTC</b> (profit factor 0.60&nbsp;→&nbsp;0.99) and <b>gold</b> (0.76&nbsp;→&nbsp;1.26) from losers into break‑even/positive,
+    while swing <b>structure</b> stays best on the orderly index, <b>MES</b>. <b>SPY</b> works either way.
+  </div>
+
+  <div class="card">
+    <h2>Profit factor by market</h2>
+    <p class="note">Dollars won per dollar lost. Above the dashed line (1.0) makes money; below loses.</p>
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--struct)"></i>Structure trend</span>
+      <span><i class="swatch" style="background:var(--pm)"></i>Point‑movement</span>
+      <span style="color:var(--muted)">— — 1.0 = break‑even</span>
+    </div>
+    <svg id="pf" viewBox="0 0 660 300" role="img" aria-label="Profit factor by market, structure vs point-movement"></svg>
+    <p class="cap">Tuned hybrid_core (stop 1.5 ATR / target 3 ATR). BTC 3.3 yr &amp; SPY 4.75 yr daily; gold &amp; MES intraday.</p>
+  </div>
+
+  <div class="card">
+    <h2>Net result, in R (risk multiples)</h2>
+    <p class="note">Total profit measured in units of the amount risked per trade. Zero line = flat.</p>
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--struct)"></i>Structure trend</span>
+      <span><i class="swatch" style="background:var(--pm)"></i>Point‑movement</span>
+    </div>
+    <svg id="netr" viewBox="0 0 660 300" role="img" aria-label="Net R by market, structure vs point-movement"></svg>
+    <p class="cap">R = profit ÷ per‑trade risk, so a +20 R total is 20× one trade's risk. Sample sizes vary; see notes.</p>
+  </div>
+
+  <div class="card">
+    <h2>Today's session — 2026‑09‑29, from 9:30 AM ET</h2>
+    <p class="note">A single day, entries from the open. It was a choppy, non‑trending session.</p>
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--struct)"></i>Structure</span>
+      <span><i class="swatch" style="background:var(--pm)"></i>Momentum (N3)</span>
+    </div>
+    <svg id="today" viewBox="0 0 660 260" role="img" aria-label="Today's session net R by market"></svg>
+    <p class="cap">25 of 29 trades stopped out. Expected on a range day — this strategy earns on trend days, not chop.</p>
+  </div>
+
+  <p class="foot">
+    <b>How to read it.</b> Profit factor and R come from the same trades, seen two ways: PF is the ratio, R is the total size.
+    <b>Caveats:</b> modest samples in single regimes (BTC/SPY are years of daily bars; gold ~2.5 months, MES ~8.5 months of intraday). One session proves nothing on its own. This is validation, not a guarantee — paper‑trade before risking size.
+  </p>
+</div>
+
+<script>
+const CROSS = [
+  {a:"BTC",  pf:[0.60,0.99], r:[-11.1, 9.8]},
+  {a:"Gold", pf:[0.76,1.26], r:[-10.2,11.3]},
+  {a:"SPY",  pf:[1.57,1.46], r:[ 21.0,28.1]},
+  {a:"MES",  pf:[1.00,0.95], r:[  9.5,-14.7]},
+];
+const TODAY = [
+  {a:"MES",  r:[-2.0,-1.0]},
+  {a:"SPY",  r:[ 0.0,-1.0]},
+  {a:"Gold", r:[ 0.0,-5.0]},
+  {a:"BTC",  r:[-2.0,-4.0]},
+];
+const C = {struct:cssv("--struct"), pm:cssv("--pm"), grid:cssv("--grid"),
+           ink:cssv("--ink"), ink2:cssv("--ink-2"), muted:cssv("--muted"),
+           good:cssv("--good"), bad:cssv("--bad"), surface:cssv("--surface")};
+function cssv(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
+const SVGNS="http://www.w3.org/2000/svg";
+function el(t,at){const e=document.createElementNS(SVGNS,t);for(const k in at)e.setAttribute(k,at[k]);return e;}
+function txt(x,y,s,at){const e=el("text",Object.assign({x,y},at));e.textContent=s;return e;}
+
+// Grouped vertical bars with a value baseline (zero or a floor) and optional reference line.
+function grouped(id, rows, {min,max,ref,fmt,unit,colors,decimals=2}){
+  const svg=document.getElementById(id);
+  const W=660,H=+svg.getAttribute("viewBox").split(" ")[3];
+  const mL=44,mR=14,mT=16,mB=42;
+  const pw=W-mL-mR, ph=H-mT-mB;
+  const y = v => mT + ph*(max-v)/(max-min);
+  const zero = y(Math.max(min,Math.min(max,0)));
+  // gridlines
+  const step=(max-min)/4;
+  for(let i=0;i<=4;i++){const gv=min+step*i;const yy=y(gv);
+    svg.appendChild(el("line",{x1:mL,y1:yy,x2:W-mR,y2:yy,stroke:C.grid,"stroke-width":1}));
+    svg.appendChild(txt(mL-8,yy+4,(gv).toFixed(gv%1?1:0),{fill:C.muted,"font-size":11,"text-anchor":"end"}));
+  }
+  if(ref!=null){const yy=y(ref);
+    svg.appendChild(el("line",{x1:mL,y1:yy,x2:W-mR,y2:yy,stroke:C.muted,"stroke-width":1.5,"stroke-dasharray":"5 4"}));
+  }
+  const n=rows.length, gw=pw/n, bw=Math.min(46,gw*0.30), gap=10;
+  rows.forEach((row,i)=>{
+    const cx=mL+gw*i+gw/2;
+    const xs=[cx-bw-gap/2, cx+gap/2];
+    row.vals.forEach((v,s)=>{
+      const x=xs[s], yv=y(v);
+      const top=Math.min(yv,zero), hgt=Math.max(2,Math.abs(yv-zero));
+      const col = colors[s];
+      const g=el("rect",{x,y:top,width:bw,height:hgt,rx:4,fill:col});
+      svg.appendChild(g);
+      // value label
+      const above = v>=(ref!=null?ref:0);
+      const ly = v>=0 ? yv-6 : yv+14;
+      svg.appendChild(txt(x+bw/2, ly, (unit==="pf"?v.toFixed(2):(v>0?"+":"")+v.toFixed(v%1?1:0)),
+        {fill:C.ink2,"font-size":11.5,"text-anchor":"middle","font-weight":600}));
+    });
+    // category label
+    svg.appendChild(txt(cx, H-mB+22, row.a, {fill:C.ink,"font-size":13,"text-anchor":"middle","font-weight":600}));
+  });
+  // axis line
+  svg.appendChild(el("line",{x1:mL,y1:zero,x2:W-mR,y2:zero,stroke:C.ink2,"stroke-width":1.25}));
+}
+
+grouped("pf", CROSS.map(d=>({a:d.a,vals:d.pf})), {min:0,max:1.6,ref:1.0,unit:"pf",colors:[C.struct,C.pm]});
+grouped("netr", CROSS.map(d=>({a:d.a,vals:d.r})), {min:-15,max:30,ref:0,unit:"r",colors:[C.struct,C.pm]});
+grouped("today", TODAY.map(d=>({a:d.a,vals:d.r})), {min:-6,max:2,ref:0,unit:"r",colors:[C.struct,C.pm]});
+</script>
