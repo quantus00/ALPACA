@@ -21,6 +21,9 @@ class Broker(str, Enum):
 class Instrument(str, Enum):
     BTC_USD_SPOT = "btc_usd_spot"     # Coinbase spot
     BTC_NANO_PERP = "btc_nano_perp"   # Coinbase nano BTC perpetual future
+    US500_FUTURE = "us500_future"     # Coinbase US 500 (S&P 500) index future
+    US500_PERP = "us500_perp"         # Coinbase US 500 perpetual future
+    COINBASE_FX = "coinbase_fx"       # Coinbase tradable FX product (set the id)
     SPY_OPTIONS = "spy_options"       # Alpaca / Webull options
     MES_FUTURES = "mes_futures"       # Tradovate Micro E-mini S&P 500
 
@@ -29,16 +32,33 @@ class Instrument(str, Enum):
 INSTRUMENT_BROKERS: dict[Instrument, tuple[Broker, ...]] = {
     Instrument.BTC_USD_SPOT: (Broker.COINBASE,),
     Instrument.BTC_NANO_PERP: (Broker.COINBASE,),
+    Instrument.US500_FUTURE: (Broker.COINBASE,),
+    Instrument.US500_PERP: (Broker.COINBASE,),
+    Instrument.COINBASE_FX: (Broker.COINBASE,),
     Instrument.SPY_OPTIONS: (Broker.ALPACA, Broker.WEBULL),
     Instrument.MES_FUTURES: (Broker.TRADOVATE,),
 }
 
-# Default tradable symbol per instrument, per broker.
+# Default tradable product id per instrument. Coinbase product ids differ by
+# account/venue, so the new ones are env-overridable — set the real id the
+# droplet discovery prints (BOT_US500_FUTURE_PRODUCT / _PERP / BOT_COINBASE_FX_PRODUCT).
 INSTRUMENT_SYMBOLS: dict[Instrument, str] = {
     Instrument.BTC_USD_SPOT: "BTC-USD",
     Instrument.BTC_NANO_PERP: "BTC-PERP-INTX",
+    Instrument.US500_FUTURE: os.getenv("BOT_US500_FUTURE_PRODUCT", "US500-FUT"),
+    Instrument.US500_PERP: os.getenv("BOT_US500_PERP_PRODUCT", "US500-PERP"),
+    Instrument.COINBASE_FX: os.getenv("BOT_COINBASE_FX_PRODUCT", "EUR-USD"),
     Instrument.SPY_OPTIONS: "SPY",
     Instrument.MES_FUTURES: "MES",
+}
+
+# Coinbase order-configuration shape depends on the product type.
+COINBASE_PRODUCT_TYPE: dict[Instrument, str] = {
+    Instrument.BTC_USD_SPOT: "SPOT",
+    Instrument.BTC_NANO_PERP: "PERP",
+    Instrument.US500_FUTURE: "FUTURE",
+    Instrument.US500_PERP: "PERP",
+    Instrument.COINBASE_FX: "SPOT",
 }
 
 
@@ -85,8 +105,18 @@ class Config:
     window1_title: str = os.getenv("BOT_WINDOW_1_TITLE", "Chart")
     window2_title: str = os.getenv("BOT_WINDOW_2_TITLE", "Broker")
 
+    # Generic Coinbase product override: when set, the Coinbase instrument trades
+    # exactly this product id (any spot/perp/future/FX product discovery found).
+    coinbase_product: str = os.getenv("BOT_COINBASE_PRODUCT", "")
+
     def symbol(self) -> str:
+        if self.broker == Broker.COINBASE and self.coinbase_product:
+            return self.coinbase_product
         return INSTRUMENT_SYMBOLS[self.instrument]
+
+    def coinbase_product_type(self) -> str:
+        """SPOT / PERP / FUTURE — how to shape the Coinbase order configuration."""
+        return COINBASE_PRODUCT_TYPE.get(self.instrument, "SPOT")
 
     def validate(self) -> None:
         allowed = INSTRUMENT_BROKERS[self.instrument]

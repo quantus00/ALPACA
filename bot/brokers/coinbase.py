@@ -1,10 +1,12 @@
-"""Coinbase broker: BTC/USD spot and BTC nano perpetual futures.
+"""Coinbase broker: BTC spot/perp, US 500 index future & perp, and FX.
 
 Uses the Coinbase Advanced Trade REST API with a Cloud API key (JWT-signed).
 Requires ``coinbase-advanced-py`` (imported lazily) plus:
     COINBASE_API_KEY, COINBASE_API_SECRET
-For the nano perp, the account must be enabled for Coinbase Financial Markets
-(INTX) perpetual futures.
+Product ids for the US 500 future/perp and FX vary by account/venue — set the
+real ids the droplet discovery prints via BOT_US500_FUTURE_PRODUCT,
+BOT_US500_PERP_PRODUCT, BOT_COINBASE_FX_PRODUCT, or the generic BOT_COINBASE_PRODUCT.
+Perps/futures need the account enabled for Coinbase Financial Markets / INTX.
 """
 from __future__ import annotations
 
@@ -18,7 +20,13 @@ log = logging.getLogger(__name__)
 
 
 class CoinbaseBroker(BrokerBase):
-    supported = (Instrument.BTC_USD_SPOT, Instrument.BTC_NANO_PERP)
+    supported = (
+        Instrument.BTC_USD_SPOT,
+        Instrument.BTC_NANO_PERP,
+        Instrument.US500_FUTURE,
+        Instrument.US500_PERP,
+        Instrument.COINBASE_FX,
+    )
 
     def __init__(self, cfg: Config) -> None:
         super().__init__(cfg)
@@ -39,20 +47,20 @@ class CoinbaseBroker(BrokerBase):
     def place_order(self, side: str, size: float) -> OrderResult:
         self._guard(self.cfg.instrument)
         symbol = self.cfg.symbol()
+        ptype = self.cfg.coinbase_product_type()   # SPOT / PERP / FUTURE
         coid = str(uuid.uuid4())
 
         if self.cfg.dry_run:
-            log.info("[DRY] Coinbase %s %s %s (%s)", side, size, symbol,
-                     self.cfg.instrument.value)
+            log.info("[DRY] Coinbase %s %s %s (%s / %s)", side, size, symbol,
+                     self.cfg.instrument.value, ptype)
             return OrderResult(ok=True, broker="coinbase", symbol=symbol,
-                               side=side, size=size, order_id=f"dry-{coid}")
+                               side=side, size=size, order_id=f"dry-{coid}",
+                               raw={"product_type": ptype})
 
         client = self._get_client()
-        # market order sized in base asset (BTC) for spot, or contracts for perp.
-        if self.cfg.instrument == Instrument.BTC_NANO_PERP:
-            cfg = {"market_market_ioc": {"base_size": str(size)}}
-        else:
-            cfg = {"market_market_ioc": {"base_size": str(size)}}
+        # Spot markets size in base asset; perps/futures size in base contracts.
+        # Coinbase Advanced Trade takes base_size for all three product types.
+        cfg = {"market_market_ioc": {"base_size": str(size)}}
         try:
             resp = client.create_order(
                 client_order_id=coid,

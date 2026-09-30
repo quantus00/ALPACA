@@ -72,8 +72,16 @@ Valid broker ↔ instrument pairings (enforced at startup):
 |------------|---------|
 | BTC/USD spot | Coinbase |
 | BTC nano perp | Coinbase |
+| US 500 future | Coinbase |
+| US 500 perp | Coinbase |
+| Coinbase FX | Coinbase |
 | SPY options | Alpaca, Webull |
 | MES futures | Tradovate |
+
+Coinbase product ids for US 500 (future/perp) and FX vary by account/venue —
+set the real id via `BOT_US500_FUTURE_PRODUCT`, `BOT_US500_PERP_PRODUCT`,
+`BOT_COINBASE_FX_PRODUCT`, or the generic `BOT_COINBASE_PRODUCT` (trades exactly
+that product id). The bot picks the order shape (spot vs perp/future) automatically.
 
 ### Run
 
