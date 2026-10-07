@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card">
+  <h1 style="margin-top:0">Know the 4H trend before you trade.</h1>
+  <p class="muted">{{ brand }} reads market structure — higher highs &amp; higher lows vs lower highs &amp; lower lows —
+  on the 4-hour chart and tells you the moment the trend flips. When the 5m, 15m, 30m and 1H all line up with it,
+  you get an entry alert.</p>
+  <a class="btn" href="{{ url_for('signup') }}">Start {{ settings.trial_days }}-day free trial</a>
+  <span class="muted small" style="margin-left:10px">then {{ settings.price_label }} · cancel anytime</span>
+</div>
+<div class="grid">
+  <div class="tile"><b>4H trend flips</b><p class="muted small">UPTREND / DOWNTREND, confirmed only when both swing legs break.</p></div>
+  <div class="tile"><b>Multi-timeframe entries</b><p class="muted small">Alerts fire once per flip when 5m/15m/30m/1H align.</p></div>
+  <div class="tile"><b>Alerts where you are</b><p class="muted small">Discord, Telegram, live dashboard and a REST API.</p></div>
+  <div class="tile"><b>Markets</b><p class="muted small">{% for i in instruments %}{{ labels[i] }}{% if not loop.last %} · {% endif %}{% endfor %}</p></div>
+</div>
+<div class="card small muted">
+  You keep full control: {{ brand }} never asks for your broker login or places trades for you.
+</div>
+{% endblock %}

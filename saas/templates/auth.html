@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Sign up' if mode == 'signup' else 'Log in' }} · {{ brand }}{% endblock %}
+{% block body %}
+<div class="card" style="max-width:420px;margin:0 auto">
+  <h2 style="margin-top:0">{{ 'Create your account' if mode == 'signup' else 'Log in' }}</h2>
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <label>Email<input type="email" name="email" required autocomplete="email"></label>
+    <label>Password<input type="password" name="password" required minlength="{{ 10 if mode == 'signup' else 1 }}"
+      autocomplete="{{ 'new-password' if mode == 'signup' else 'current-password' }}"></label>
+    {% if mode == 'signup' %}
+    <p class="small"><label style="font-weight:400"><input type="checkbox" name="accept_terms" required>
+      I accept the <a href="{{ url_for('terms') }}" target="_blank">terms and risk disclosure</a> and understand signals are not financial advice.</label></p>
+    {% endif %}
+    <button class="btn" style="width:100%">{{ 'Create account' if mode == 'signup' else 'Log in' }}</button>
+  </form>
+  <p class="small muted">{% if mode == 'signup' %}Already have an account? <a href="{{ url_for('login') }}">Log in</a>{% else %}New here? <a href="{{ url_for('signup') }}">Start a free trial</a>{% endif %}</p>
+</div>
+{% endblock %}

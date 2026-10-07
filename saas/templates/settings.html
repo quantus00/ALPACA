@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Alerts &amp; API · {{ brand }}{% endblock %}
+{% block body %}
+<div class="card">
+  <h2 style="margin-top:0">Alert channels</h2>
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <label>Discord webhook URL
+      <input type="url" name="discord_webhook" value="{{ user.discord_webhook or '' }}" placeholder="https://discord.com/api/webhooks/…"></label>
+    <label>Telegram chat id
+      <input type="text" name="telegram_chat_id" value="{{ user.telegram_chat_id or '' }}" placeholder="123456789"></label>
+    <p class="small muted">Telegram: first send <code>/start</code> to {% if settings.telegram_bot_username %}<code>@{{ settings.telegram_bot_username }}</code>{% else %}our bot{% endif %}, then message <code>@userinfobot</code> to get your chat id.</p>
+    <p><b>Markets</b> <span class="small muted">(none ticked = all)</span><br>
+      {% for i in instruments %}<label style="font-weight:400;margin-right:14px"><input type="checkbox" name="instruments" value="{{ i }}" {{ 'checked' if i in chosen }}> {{ labels[i] }}</label>{% endfor %}</p>
+    <button class="btn">Save</button>
+  </form>
+  {% if has_access %}
+  <form method="post" action="{{ url_for('test_alert') }}" style="margin-top:12px">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn ghost">Send test alert</button>
+  </form>
+  {% endif %}
+</div>
+<div class="card">
+  <h2 style="margin-top:0">REST API</h2>
+  <p class="small">Your token: <code>{{ user.api_token }}</code></p>
+  <p class="small"><code>curl -H "Authorization: Bearer {{ user.api_token }}" {{ settings.base_url }}/api/signals?limit=20</code></p>
+  <form method="post"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="action" value="rotate_token">
+    <button class="btn ghost">Rotate token</button></form>
+</div>
+{% endblock %}
