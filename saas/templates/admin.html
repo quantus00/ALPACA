@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Admin · {{ brand }}{% endblock %}
+{% block body %}
+<div class="grid" style="margin-bottom:18px">
+  <div class="tile"><div class="muted small">Accounts</div><div class="v">{{ users|length }}</div></div>
+  <div class="tile"><div class="muted small">Paying / trialing</div><div class="v">{{ paying }}</div></div>
+</div>
+<div class="card"><h3 style="margin-top:0">Users</h3><div class="table-wrap"><table>
+  <tr><th>Email</th><th>Joined</th><th>Status</th><th>Renews</th><th>Comp</th></tr>
+  {% for u in users %}
+  <tr><td>{{ u.email }}{% if u.is_admin %} <span class="muted small">(admin)</span>{% endif %}</td><td>{{ u.created_at|ts }}</td>
+      <td>{{ u.subscription_status }}</td><td>{{ u.current_period_end|ts }}</td>
+      <td><form method="post"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="action" value="toggle_comp">
+        <input type="hidden" name="user_id" value="{{ u.id }}"><button class="linkbtn">{{ 'Revoke' if u.comped else 'Grant' }}</button></form></td></tr>
+  {% endfor %}
+</table></div></div>
+<div class="card"><h3 style="margin-top:0">Latest signals</h3><div class="table-wrap"><table>
+  {% for s in signals %}<tr><td>{{ s.created_at|ts }}</td><td>{{ s.instrument }}</td><td>{{ s.kind }}</td><td>{{ s.direction }}</td><td>{{ s.source }}</td></tr>{% endfor %}
+</table></div></div>
+{% endblock %}

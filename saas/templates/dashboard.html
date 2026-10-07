@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · {{ brand }}{% endblock %}
+{% block body %}
+<meta http-equiv="refresh" content="60">
+<div class="grid" style="margin-bottom:18px">
+  {% for i in instruments %}{% set t = trends.get(i) %}
+  <div class="tile">
+    <div class="muted small">{{ labels[i] }} · 4H trend</div>
+    <div class="v {{ 'up' if t and t.direction == 'UPTREND' else 'down' if t else '' }}">{{ t.direction if t else 'Waiting for first signal' }}</div>
+    {% if t %}<div class="muted small">since {{ t.created_at|ts }}{% if t.price %} @ {{ '%g'|format(t.price) }}{% endif %}</div>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+<div class="card">
+  <h3 style="margin-top:0">Recent signals</h3>
+  {% if signals %}
+  <div class="table-wrap"><table>
+    <tr><th>Time</th><th>Market</th><th>Type</th><th>Signal</th><th>Price</th><th>Detail</th></tr>
+    {% for s in signals %}
+    <tr><td>{{ s.created_at|ts }}</td><td>{{ labels.get(s.instrument, s.instrument) }}</td><td>{{ s.kind }}</td>
+        <td class="{{ 'up' if s.direction in ('UPTREND','BUY') else 'down' }}">{{ s.direction }}</td>
+        <td>{{ '%g'|format(s.price) if s.price else '—' }}</td><td class="muted small">{{ s.detail }}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<p class="muted">No signals yet — the engine publishes on the next confirmed trend flip.</p>{% endif %}
+</div>
+{% endblock %}

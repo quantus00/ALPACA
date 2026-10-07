@@ -1,0 +1,5 @@
+# Automatic HTTPS (Let's Encrypt) for your domain; proxies to the Flask app.
+{$SAAS_DOMAIN} {
+	encode gzip
+	reverse_proxy web:8000
+}

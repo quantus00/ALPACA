@@ -13,6 +13,10 @@ Two pieces:
 | **Pine Script** | `pinescript/*.pine` | On-chart signals, alerts, and **backtesting** (TradingView Strategy Tester) |
 | **Python bot** | `bot/` | Live trend notifications + order routing to Coinbase / Alpaca / Tradovate / Webull |
 
+**Selling it:** `saas/` packages the engine as a subscription signal service
+(Stripe billing, dashboard, Discord/Telegram alerts, API). See `saas/README.md`
+and `SERVER_BUILD_PROMPT.md` to deploy it.
+
 Toggles: **broker**, **instrument**, and **contract size** — so the same bot can
 trade **BTC/USD spot**, **BTC nano perp**, **SPY options**, and **MES futures**.
 

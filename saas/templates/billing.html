@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Billing · {{ brand }}{% endblock %}
+{% block body %}
+<div class="card">
+  <h2 style="margin-top:0">Subscription</h2>
+  {% if checkout == 'success' %}<div class="flash ok">Thanks! Your subscription activates as soon as Stripe confirms payment (usually a few seconds) — refresh if the status below hasn't changed.</div>{% endif %}
+  <p>Status: <b>{{ user.subscription_status }}</b>{% if user.comped %} · complimentary access{% endif %}
+     {% if user.current_period_end %}<span class="muted"> · renews/ends {{ user.current_period_end|ts }}</span>{% endif %}</p>
+  {% if has_access %}
+    <a class="btn" href="{{ url_for('dashboard') }}">Go to dashboard</a>
+  {% endif %}
+  {% if user.subscription_status not in ('active', 'trialing') %}
+    <form method="post" action="{{ url_for('billing_checkout') }}" style="display:inline">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <button class="btn">Subscribe — {{ settings.price_label }}{% if settings.trial_days and user.subscription_status == 'none' %} ({{ settings.trial_days }}-day free trial){% endif %}</button>
+    </form>
+  {% endif %}
+  {% if user.stripe_customer_id %}
+    <form method="post" action="{{ url_for('billing_portal') }}" style="display:inline">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <button class="btn ghost">Manage billing / cancel</button>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}
