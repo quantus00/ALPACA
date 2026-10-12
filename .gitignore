@@ -8,3 +8,4 @@ venv/
 .DS_Store
 *.log
 backtest/trades.csv
+backtest/data/reversal/

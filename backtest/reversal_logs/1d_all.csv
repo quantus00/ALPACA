@@ -1,0 +1,2 @@
+signal_time,signal_price,actual_top_time,actual_top_price,late_by_usd,actual_bottom_time,actual_bottom_price,possible_usd,exit_time,exit_price,exit_reason,pnl_usd,hours_held
+2022-01-09 00:00:00+00:00,41875.81,2021-11-10 00:00:00+00:00,69000.0,27124.19,2022-11-21 00:00:00+00:00,15479.0,26396.81,2022-01-13 00:00:00+00:00,44388.36,stop,-2566.55,4

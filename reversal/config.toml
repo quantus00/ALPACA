@@ -1,0 +1,82 @@
+# Reversal detector — every tunable number lives here.
+#
+# The detector looks for ONE thing: a confirmed uptrend turning into a
+# downtrend (to open a BTC futures short), and the downtrend turning back up
+# (to cover). Your spot BTC is never touched by this module.
+
+[structure]
+# A swing high/low is a bar that is the extreme of `pivot_lookback` bars on
+# each side. It is only *known* `pivot_lookback` bars later (no lookahead).
+pivot_lookback = 5
+
+[layers]
+# Turn each confluence on/off. `structure` (lower high, then a close below the
+# last higher low, while the trend is UP) is always required.
+divergence = true      # RSI lower high at the final price higher high
+volume     = true      # breakdown bar volume spike
+retest     = true      # enter only on a failed retest of the broken level
+macd       = true      # MACD line < signal AND < 0 at entry
+adx        = true      # ADX > threshold AND -DI > +DI at entry
+htf        = true      # higher-timeframe close below its EMA at entry
+
+[divergence]
+rsi_length = 14
+
+[volume]
+sma_length = 20
+multiplier = 1.5       # break-bar volume >= multiplier x average
+
+[retest]
+max_bars      = 20     # how long to wait for the retest after the break
+tolerance_atr = 0.25   # high must come within this many ATRs of the level
+
+[macd]
+fast = 12
+slow = 26
+signal = 9
+
+[adx]
+length = 14
+threshold = 20
+
+[htf]
+# Higher timeframe used for each entry timeframe, and the EMA it must close below.
+map = { "1h" = "1d", "4h" = "1d", "1d" = "1w" }
+ema_length = 50
+
+[exits]
+atr_length        = 14
+stop_buffer_atr   = 0.25  # initial stop = lower high + buffer x ATR
+trail_atr         = 2.0   # trailing stop = lowest low since entry + trail x ATR
+hard_stop_pct     = 0.06  # never risk more than this price move against the short
+use_trail         = false # tested: a 2-5x ATR trail shakes shorts out early and loses money
+use_early_warning = true  # close back above broken level AND bullish MACD cross
+use_trend_flip    = true  # higher low confirmed, then close above last swing high
+
+[sizing]
+# What the short is placed on. BTC exposure per signal = contracts x btc_per_contract.
+product   = "nano_perp"   # one of the [products.*] tables below
+contracts = 100           # 100 nano = 1 BTC; 10 CME micro = 1 BTC
+
+# Per-product contract size and ALL-IN fee per contract per side (in OR out).
+# Exchange fees are from Coinbase Derivatives' schedule; brokerage fees vary —
+# put the all-in number from your order ticket here.
+[products.nano_perp]          # Coinbase US perpetual-style nano BTC-PERP
+btc_per_contract = 0.01
+fee_usd_per_contract_side = 0.17   # ~0.02% of ~$840 notional (min $0.15)
+funding = true
+
+[products.nano_dated]         # Coinbase nano Bitcoin futures (BIT), monthly expiry
+btc_per_contract = 0.01
+fee_usd_per_contract_side = 0.15   # $0.10 exchange + brokerage (check your ticket)
+funding = false
+
+[products.cme_micro]          # CME Micro Bitcoin futures (MBT), 0.1 BTC
+btc_per_contract = 0.1
+fee_usd_per_contract_side = 2.50   # PLACEHOLDER — set your broker's all-in MBT fee
+funding = false
+
+[costs]
+slippage_usd_per_btc_side = 10.0   # spread/slippage per BTC of exposure, per side
+funding_per_8h            = 0.0    # perp only: fraction of notional paid by the short per 8h
+                                   # (positive = shorts receive when longs pay; enter as cost if negative)
