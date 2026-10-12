@@ -80,3 +80,45 @@ def test_bottom_is_mirror_of_top():
     assert len(b) == 1
     assert abs(b.iloc[0].signal_price - (250 - 127.35)) < 1e-6      # mirror of the top signal
     assert b.iloc[0].extreme_price < 111 and b.iloc[0].valid
+
+
+def _textbook():
+    legs = [(100, 110, 20), (110, 104, 12), (104, 120, 32), (120, 110, 12), (110, 140, 30), (140, 128, 12),
+            (128, 135, 10), (135, 90, 60), (90, 92, 40)]
+    px = np.concatenate([np.linspace(a, b, n, endpoint=False) for a, b, n in legs])
+    px = px + np.where(np.arange(len(px)) % 2, 0.15, -0.15)
+    idx = pd.date_range("2024-01-01", periods=len(px), freq="1h", tz="UTC")
+    return pd.DataFrame({"open": np.r_[px[0], px[:-1]], "high": px + 0.3, "low": px - 0.3,
+                         "close": px, "volume": 50.0}, index=idx)
+
+
+def test_funding_filter_and_mirror():
+    """Top needs funding in its top 20%; the mirrored (bottom) frame flips funding."""
+    from reversal.detector import attach_funding, invert
+    df = _textbook()
+    cfg = load_config()
+    cfg["funding"]["rank_days"] = 3
+    lay = {**{k: False for k in LAYERS}, "funding": True}
+    ft = pd.date_range(df.index[0], df.index[-1], freq="8h")
+    rising = pd.DataFrame({"funding": np.linspace(-1e-4, 3e-4, len(ft))}, index=ft)   # high at the top
+    falling = pd.DataFrame({"funding": np.linspace(3e-4, -1e-4, len(ft))}, index=ft)  # low at the top
+    hi = attach_funding(df, rising, "1h")
+    lo = attach_funding(df, falling, "1h")
+    assert len(run(prepare(hi, "1h", None, cfg), cfg, lay, signals_only=True)) == 1
+    assert len(run(prepare(lo, "1h", None, cfg), cfg, lay, signals_only=True)) == 0
+    assert (invert(hi)["funding"] == -hi["funding"]).all()
+    # funding at a bar is the last value known at that bar's close
+    assert hi["funding"].iloc[8] == rising["funding"].iloc[1]
+
+
+def test_funding_parsers():
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backtest"))
+    import fetch_funding as ff
+    assert ff.parse_binance([{"symbol": "BTCUSDT", "fundingTime": 1700000000000, "fundingRate": "0.0001"}]) \
+        == [(1700000000000, 0.0001)]
+    assert ff.parse_bybit({"result": {"list": [{"fundingRate": "-0.00005", "fundingRateTimestamp": "1700028800000"}]}}) \
+        == [(1700028800000, -0.00005)]
+    assert ff.parse_deribit({"result": [{"timestamp": 1700000000000, "interest_8h": 0.0002, "interest_1h": 2e-5}]}) \
+        == [(1700000000000, 0.0002)]

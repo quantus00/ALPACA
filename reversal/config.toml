@@ -19,9 +19,15 @@ macd       = true      # MACD line < signal AND < 0 at entry
 adx        = true      # ADX > threshold AND -DI > +DI at entry
 htf        = true      # higher-timeframe close below its EMA at entry
 key_level  = false     # the top must be the highest high of the last N days (bottom: lowest low)
+funding    = false     # perp funding in its top X% of the past N days at a top (bottom: lowest X%)
 
 [key_level]
 lookback_days = 30
+
+[funding]
+# Needs backtest/data/reversal/BTC_funding.csv (backtest/fetch_funding.py, run on your server).
+rank_days = 90         # compare the last-24h average funding with the past 90 days
+top_pct   = 0.80       # top signal needs funding in the top 20% (bottom signal: lowest 20%)
 
 [divergence]
 rsi_length = 14

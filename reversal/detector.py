@@ -79,6 +79,15 @@ def prepare(df: pd.DataFrame, tf: str, htf_df: pd.DataFrame | None, cfg: dict) -
     # Key level: highest high of the last N days up to each bar (only past bars).
     kl_bars = max(1, int(cfg.get("key_level", {}).get("lookback_days", 30) * 24 / TF_HOURS[tf]))
     d["roll_max"] = d["high"].rolling(kl_bars, min_periods=1).max()
+    # Funding: percentile of the last-24h average funding vs the past N days (past bars only).
+    if "funding" in d.columns:
+        fc = cfg.get("funding", {})
+        per_day = int(24 / TF_HOURS[tf]) or 1
+        f24 = d["funding"].rolling(per_day, min_periods=1).mean()
+        win = max(per_day, int(fc.get("rank_days", 90) * per_day))
+        d["fund_pct"] = f24.rolling(win, min_periods=win // 4).rank(pct=True)
+    else:
+        d["fund_pct"] = np.nan
 
     d["htf_bear"] = True
     if htf_df is not None:
@@ -116,6 +125,19 @@ def invert(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     out["open"], out["close"] = -df["open"], -df["close"]
     out["high"], out["low"] = -df["low"], -df["high"]
+    if "funding" in df.columns:             # crowded longs at a top <-> crowded shorts at a bottom
+        out["funding"] = -df["funding"]
+    return out
+
+
+def attach_funding(df: pd.DataFrame, funding: pd.DataFrame, tf: str) -> pd.DataFrame:
+    """Add a `funding` column: the latest funding rate known at each bar's CLOSE (no lookahead)."""
+    left = pd.DataFrame({"t": df.index + pd.Timedelta(hours=TF_HOURS[tf])})
+    f = funding.sort_index()
+    right = pd.DataFrame({"t": f.index, "funding": f["funding"].to_numpy(float)})
+    m = pd.merge_asof(left, right, on="t")
+    out = df.copy()
+    out["funding"] = m["funding"].to_numpy()
     return out
 
 
@@ -146,6 +168,7 @@ def run(d: pd.DataFrame, cfg: dict, layers: dict | None = None, log=None,
         cache[L] = _pivots(h, l, L)
     is_ph, is_pl = cache[L]
     roll_max = d["roll_max"].to_numpy(float)
+    fund_pct = d["fund_pct"].to_numpy(float)
 
     qty, fee_btc_side, uses_funding = position_size(cfg)
     usd_side = fee_btc_side + costs["slippage_usd_per_btc_side"]
@@ -238,6 +261,8 @@ def run(d: pd.DataFrame, cfg: dict, layers: dict | None = None, log=None,
                     ok &= top[2] < pre[2]
                 if lay.get("key_level"):              # top = highest high of the last N days
                     ok &= top[1] >= roll_max[top[0]]
+                if lay.get("funding"):                # crowded longs at the top (bottom: crowded shorts)
+                    ok &= fund_pct[i] >= cfg["funding"]["top_pct"]   # NaN (no data yet) -> no signal
                 if lay["volume"]:
                     ok &= vsma[i] > 0 and vol[i] >= cfg["volume"]["multiplier"] * vsma[i]
                 used_top = top[0]                     # one attempt per top

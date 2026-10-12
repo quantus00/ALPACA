@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).parent))
 from reversal.accuracy import grade_signals, grade_turns  # noqa: E402
-from reversal.detector import LAYERS, invert, load_config, prepare, run  # noqa: E402
+from reversal.detector import LAYERS, attach_funding, invert, load_config, prepare, run  # noqa: E402
 
 HERE = Path(__file__).parent
 DATA = HERE / "data" / "reversal"
@@ -44,6 +44,10 @@ def _load(tf):
 def _init(cfg_path):
     _G["cfg"] = load_config(cfg_path)
     _G["bars"] = {tf: _load(tf) for tf in ("15m", "1h", "4h", "1d")}
+    fpath = DATA / "BTC_funding.csv"
+    if fpath.exists():                         # optional: perp funding history (fetch_funding.py)
+        f = pd.read_csv(fpath, index_col="time", parse_dates=["time"])
+        _G["bars"]["1h"] = attach_funding(_G["bars"]["1h"], f, "1h")
     _G["frames"] = {}
 
 
@@ -80,31 +84,33 @@ def _summ(g: pd.DataFrame, turns: pd.DataFrame, split, prefix: str) -> dict:
 
 
 def stage_a(params):
-    L, htf, kl, div, vol, macd = params
+    L, htf, kl, div, vol, macd, fund = params
     cfg = copy.deepcopy(_G["cfg"])
     cfg["structure"]["pivot_lookback"] = L
     d, di = _frames(htf, kl)
     lay = {k: False for k in LAYERS}
-    lay.update(divergence=bool(div), volume=bool(vol), macd=bool(macd), htf=htf != "none", key_level=kl > 0)
+    lay.update(divergence=bool(div), volume=bool(vol), macd=bool(macd), htf=htf != "none", key_level=kl > 0,
+               funding=bool(fund))
     tops = run(d, cfg, lay, signals_only=True)
     bots = run(di, cfg, lay, signals_only=True)
     g = grade_signals(d, di, tops, bots, cfg)
     if g.empty:
         return None
     turns = grade_turns(_G["bars"]["1h"], g, cfg)
-    return dict(pivot=L, trend=htf, key_days=kl, divergence=div, volume=vol, macd=macd,
+    return dict(pivot=L, trend=htf, key_days=kl, divergence=div, volume=vol, macd=macd, funding=fund,
                 **_summ(g, turns, _G["split"], ""))
 
 
 def stage_b(params):
     from reversal.ltf_entry import simulate
-    (L, htf, kl, div, vol, macd), retr = params
+    (L, htf, kl, div, vol, macd, fund), retr = params
     cfg = copy.deepcopy(_G["cfg"])
     cfg["structure"]["pivot_lookback"] = L
     cfg["ltf"]["min_retrace"] = retr
     d, di = _frames(htf, kl)
     lay = {k: False for k in LAYERS}
-    lay.update(divergence=bool(div), volume=bool(vol), macd=bool(macd), htf=htf != "none", key_level=kl > 0)
+    lay.update(divergence=bool(div), volume=bool(vol), macd=bool(macd), htf=htf != "none", key_level=kl > 0,
+               funding=bool(fund))
     tops = run(d, cfg, lay, signals_only=True)
     bots = run(di, cfg, lay, signals_only=True)
     if "p15" not in _G:
@@ -122,7 +128,7 @@ def stage_b(params):
         return None
     g = g.sort_values("signal_time").reset_index(drop=True)
     turns = grade_turns(_G["bars"]["1h"], g, cfg)
-    return dict(pivot=L, trend=htf, key_days=kl, divergence=div, volume=vol, macd=macd, min_retrace=retr,
+    return dict(pivot=L, trend=htf, key_days=kl, divergence=div, volume=vol, macd=macd, funding=fund, min_retrace=retr,
                 **_summ(g, turns, _G["split"], ""))
 
 
@@ -136,7 +142,8 @@ def describe(r) -> str:
                                        "4h_ema50": "4h EMA50"}[r.trend]]
     if r.key_days:
         parts.append(f"{int(r.key_days)}-day high/low")
-    parts += [n for n, on in (("divergence", r.divergence), ("volume", r.volume), ("MACD", r.macd)) if on]
+    parts += [n for n, on in (("divergence", r.divergence), ("volume", r.volume), ("MACD", r.macd),
+                              ("funding extreme", r.get("funding", 0))) if on]
     if "min_retrace" in r and not pd.isna(r.get("min_retrace", np.nan)):
         parts.append(f"15m pullback {r.min_retrace:g}")
     return ", ".join(parts)
@@ -165,7 +172,11 @@ def main():
     ap.add_argument("--workers", type=int, default=2)
     a = ap.parse_args()
 
-    grid = list(itertools.product((3, 5, 8, 12, 20), HTF, (0, 7, 30), (0, 1), (0, 1), (0, 1)))
+    has_funding = (DATA / "BTC_funding.csv").exists()
+    if has_funding:
+        print("funding data found: adding the funding filter to the search")
+    grid = list(itertools.product((3, 5, 8, 12, 20), HTF, (0, 7, 30), (0, 1), (0, 1), (0, 1),
+                                  (0, 1) if has_funding else (0,)))
     with ProcessPoolExecutor(a.workers, initializer=_worker_init, initargs=(a.config, a.split)) as ex:
         res = [r for r in ex.map(stage_a, grid, chunksize=4) if r]
     A = pd.DataFrame(res)
@@ -176,7 +187,8 @@ def main():
     print("stage A done:", len(A), "configs")
 
     # Stage B: 15m pullback on the 12 best stage-A setups (chosen on TRAIN only)
-    combos = [((int(r.pivot), r.trend, int(r.key_days), int(r.divergence), int(r.volume), int(r.macd)), retr)
+    combos = [((int(r["pivot"]), r.trend, int(r.key_days), int(r.divergence), int(r.volume), int(r.macd),
+                int(r.funding)), retr)
               for _, r in bestA.iterrows() for retr in (0.382, 0.5, 0.618)]
     with ProcessPoolExecutor(a.workers, initializer=_worker_init, initargs=(a.config, a.split)) as ex:
         resb = [r for r in ex.map(stage_b, combos) if r]
@@ -186,7 +198,7 @@ def main():
     okB = B[(B.train_top_n >= 15) & (B.train_bottom_n >= 15)]
     print("stage B done:", len(B), "configs")
 
-    base = A[(A["pivot"] == 5) & (A.trend == "none") & (A.key_days == 0) & (A.divergence == 0) & (A.volume == 0) & (A.macd == 0)]
+    base = A[(A["pivot"] == 5) & (A.trend == "none") & (A.key_days == 0) & (A.divergence == 0) & (A.volume == 0) & (A.macd == 0) & (A.funding == 0)]
     lines = [f"# Reversal-rate search (BTC) — target {a.target:.0%} on tops AND bottoms", "",
              f"Tuned on TRAIN = 2017 to {a.split}; TEST = {a.split} to Oct 2026 was never used to choose. "
              "Rate = share of signals graded VALID (moved the signal's way by at least max(how late it was, "
