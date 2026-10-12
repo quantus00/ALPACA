@@ -106,7 +106,10 @@ def grade_turns(d: pd.DataFrame, graded: pd.DataFrame, cfg: dict) -> pd.DataFram
     have (1h) for every timeframe so all timeframes are graded against the same turns.
     """
     h, l = d["high"].to_numpy(float), d["low"].to_numpy(float)
-    pts = zigzag(h, l, cfg["accuracy"]["big_turn_pct"])
+    key = ("_zigzag", cfg["accuracy"]["big_turn_pct"])
+    if key not in d.attrs:                                   # turns depend only on the bars
+        d.attrs[key] = zigzag(h, l, cfg["accuracy"]["big_turn_pct"])
+    pts = d.attrs[key]
     rows = []
     for n, (i, p, kind) in enumerate(pts):
         nxt_i = pts[n + 1][0] if n + 1 < len(pts) else len(h) - 1

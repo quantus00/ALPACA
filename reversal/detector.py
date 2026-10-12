@@ -76,6 +76,9 @@ def prepare(df: pd.DataFrame, tf: str, htf_df: pd.DataFrame | None, cfg: dict) -
     d["atr"] = ind.atr(h, l, c, cfg["exits"]["atr_length"])
     d["adx"], d["pdi"], d["mdi"] = ind.adx(h, l, c, cfg["adx"]["length"])
     d["vol_sma"] = d["volume"].rolling(cfg["volume"]["sma_length"]).mean()
+    # Key level: highest high of the last N days up to each bar (only past bars).
+    kl_bars = max(1, int(cfg.get("key_level", {}).get("lookback_days", 30) * 24 / TF_HOURS[tf]))
+    d["roll_max"] = d["high"].rolling(kl_bars, min_periods=1).max()
 
     d["htf_bear"] = True
     if htf_df is not None:
@@ -138,7 +141,11 @@ def run(d: pd.DataFrame, cfg: dict, layers: dict | None = None, log=None,
     r, mc, ms = d["rsi"].to_numpy(float), d["macd"].to_numpy(float), d["macd_sig"].to_numpy(float)
     atr_, adx_, pdi, mdi = (d[k].to_numpy(float) for k in ("atr", "adx", "pdi", "mdi"))
     htf_bear = d["htf_bear"].to_numpy(bool)
-    is_ph, is_pl = _pivots(h, l, L)
+    cache = d.attrs.setdefault("_pivots", {})            # same bars + lookback -> same pivots
+    if L not in cache:
+        cache[L] = _pivots(h, l, L)
+    is_ph, is_pl = cache[L]
+    roll_max = d["roll_max"].to_numpy(float)
 
     qty, fee_btc_side, uses_funding = position_size(cfg)
     usd_side = fee_btc_side + costs["slippage_usd_per_btc_side"]
@@ -216,7 +223,12 @@ def run(d: pd.DataFrame, cfg: dict, layers: dict | None = None, log=None,
         # between the top and the lower high (the "neckline").
         if setup is None and len(highs) >= 3 and lows:
             pre, top, lower_high = highs[-3], highs[-2], highs[-1]
-            between = [p for k, p in lows if top[0] < k < lower_high[0]]
+            between = []
+            for k, p in reversed(lows):                   # lows are in time order: scan back to the top only
+                if k <= top[0]:
+                    break
+                if k < lower_high[0]:
+                    between.append(p)
             level = min(between) if between else lows[-1][1]
             fresh = c[i - 1] >= level or lower_high[0] == j    # just crossed, or LH confirmed this bar
             if (top[0] > used_top and top[3] == 1 and top[1] > pre[1] and lower_high[1] < top[1]
@@ -224,6 +236,8 @@ def run(d: pd.DataFrame, cfg: dict, layers: dict | None = None, log=None,
                 ok = True
                 if lay["divergence"]:
                     ok &= top[2] < pre[2]
+                if lay.get("key_level"):              # top = highest high of the last N days
+                    ok &= top[1] >= roll_max[top[0]]
                 if lay["volume"]:
                     ok &= vsma[i] > 0 and vol[i] >= cfg["volume"]["multiplier"] * vsma[i]
                 used_top = top[0]                     # one attempt per top

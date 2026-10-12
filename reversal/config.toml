@@ -18,6 +18,10 @@ retest     = true      # enter only on a failed retest of the broken level
 macd       = true      # MACD line < signal AND < 0 at entry
 adx        = true      # ADX > threshold AND -DI > +DI at entry
 htf        = true      # higher-timeframe close below its EMA at entry
+key_level  = false     # the top must be the highest high of the last N days (bottom: lowest low)
+
+[key_level]
+lookback_days = 30
 
 [divergence]
 rsi_length = 14
