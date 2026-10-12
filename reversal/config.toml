@@ -90,3 +90,29 @@ confirm_atr = 2.0
 # A "big real turn" is a swing that reversed by at least this much (hindsight
 # zigzag on highs/lows). Used to count which big turns the detector caught.
 big_turn_pct = 0.10
+
+[ltf]
+# 1h structure break -> 15m pullback entry (reversal/ltf_entry.py)
+pivot_lookback  = 2      # 15m swing lows/highs: extreme of 2 bars each side
+min_retrace     = 0.382  # pullback must retrace at least this much of the 1h leg
+max_retrace     = 0.786  # ...and not more than this (or above the 1h lower high)
+stop_buffer_atr = 0.1    # stop = pullback extreme + this x 15m ATR
+max_wait_hours  = 24     # give up if no entry within this long after the 1h signal
+rr              = [2.0, 3.0]
+
+# Instruments for the 15m pullback backtest. usd_per_point = $ per 1.0 price move
+# for the WHOLE position. Fees are per contract per side; slippage in price points per side.
+[instruments.BTC]        # uses [sizing] + [products] above (100 nano = 1 BTC)
+use_sizing = true
+
+[instruments.GOLD]       # micro gold futures (MGC): 10 oz -> $10 per $1.00
+contracts       = 1
+usd_per_point   = 10.0
+fee_usd_per_contract_side = 1.00   # PLACEHOLDER: set your broker's all-in MGC fee
+slippage_points = 0.10             # 1 tick
+
+[instruments.MES]        # Micro E-mini S&P 500: $5 per index point
+contracts       = 1
+usd_per_point   = 5.0
+fee_usd_per_contract_side = 0.62   # PLACEHOLDER: set your broker's all-in MES fee
+slippage_points = 0.25             # 1 tick

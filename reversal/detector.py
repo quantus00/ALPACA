@@ -31,7 +31,7 @@ import pandas as pd
 from . import indicators as ind
 
 LAYERS = ("divergence", "volume", "retest", "macd", "adx", "htf")
-TF_HOURS = {"1h": 1, "4h": 4, "1d": 24, "1w": 168}
+TF_HOURS = {"15m": 0.25, "1h": 1, "4h": 4, "1d": 24, "1w": 168}
 CONFIG_PATH = Path(__file__).with_name("config.toml")
 
 
@@ -61,6 +61,7 @@ class Trade:
     pnl_usd: float = 0.0             # dollar P&L for the configured contracts, after costs
     top_time: pd.Timestamp | None = None   # bar of the swing high the reversal came from
     entry_i: int = 0
+    lower_high: float = 0.0          # the lower high after the top (setup invalidation level)
     path: list = field(default_factory=list, repr=False)  # per-bar mark-to-market returns
 
 
@@ -243,7 +244,8 @@ def run(d: pd.DataFrame, cfg: dict, layers: dict | None = None, log=None,
                 trig = c[i] < setup["level"]
             if trig and entry_ok(i) and signals_only:
                 trades.append(Trade(entry_time=t[i], entry_price=c[i], break_level=setup["level"],
-                                    top=setup["top"], top_time=t[setup["top_i"]], entry_i=i))
+                                    top=setup["top"], top_time=t[setup["top_i"]], entry_i=i,
+                                    lower_high=setup["lh"]))
                 note(i, "signal", f"reversal signal @ {c[i]:,.2f}")
                 setup = None
             elif trig and entry_ok(i):

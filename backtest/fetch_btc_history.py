@@ -17,7 +17,7 @@ import pandas as pd
 
 BASE = "https://raw.githubusercontent.com/ff137/bitstamp-btcusd-minute-data/main/data"
 FILES = ("historical/btcusd_bitstamp_1min_2012-2025.csv.gz", "updates/btcusd_bitstamp_1min_latest.csv")
-RULES = {"1h": "1h", "4h": "4h", "1d": "1D", "1w": "W-MON"}
+RULES = {"15m": "15min", "1h": "1h", "4h": "4h", "1d": "1D", "1w": "W-MON"}
 
 
 def main() -> None:
