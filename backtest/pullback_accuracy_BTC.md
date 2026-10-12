@@ -8,40 +8,40 @@ Columns per side: entries | valid | avg $ late vs real top/bottom | avg $ move a
 
 | entry | TOPS: entries | valid | late | move | big caught | late on big | BOTTOMS: entries | valid | late | move | big caught | late on big |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| at 1h signal | 316 | 39% | $1,444 | $1,966 | 104/257 | $2,087 | 319 | 43% | $1,623 | $1,940 | 122/257 | $2,568 |
-| 15m pullback | 157 | 50% | $1,252 | $2,359 | 54/257 | $2,020 | 104 | 50% | $1,463 | $2,280 | 48/257 | $4,361 |
+| at 1h signal | 316 | 39% | $14 | $20 | 104/257 | $21 | 319 | 43% | $16 | $19 | 122/257 | $26 |
+| 15m pullback | 157 | 50% | $13 | $24 | 54/257 | $20 | 104 | 50% | $15 | $23 | 48/257 | $44 |
 
 ## 1h setup: structure only — 3y (from Oct 2023)
 
 | entry | TOPS: entries | valid | late | move | big caught | late on big | BOTTOMS: entries | valid | late | move | big caught | late on big |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| at 1h signal | 95 | 42% | $2,305 | $3,297 | 20/32 | $4,323 | 90 | 43% | $2,684 | $3,735 | 22/32 | $6,575 |
-| 15m pullback | 46 | 57% | $2,049 | $4,633 | 12/32 | $4,593 | 34 | 47% | $2,357 | $3,736 | 11/32 | $11,510 |
+| at 1h signal | 95 | 42% | $23 | $33 | 20/32 | $43 | 90 | 43% | $27 | $37 | 22/32 | $66 |
+| 15m pullback | 46 | 57% | $20 | $46 | 12/32 | $46 | 34 | 47% | $24 | $37 | 11/32 | $115 |
 
 ## 1h setup: structure only — 12m (from Oct 2025)
 
 | entry | TOPS: entries | valid | late | move | big caught | late on big | BOTTOMS: entries | valid | late | move | big caught | late on big |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| at 1h signal | 33 | 52% | $2,204 | $4,425 | 7/8 | $2,905 | 30 | 43% | $2,316 | $2,631 | 7/9 | $5,722 |
-| 15m pullback | 12 | 83% | $1,999 | $6,997 | 4/8 | $3,877 | 10 | 40% | $1,839 | $2,560 | 4/9 | $7,411 |
+| at 1h signal | 33 | 52% | $22 | $44 | 7/8 | $29 | 30 | 43% | $23 | $26 | 7/9 | $57 |
+| 15m pullback | 12 | 83% | $20 | $70 | 4/8 | $39 | 10 | 40% | $18 | $26 | 4/9 | $74 |
 
 ## 1h setup: structure + daily filter — full (from Mar 2017)
 
 | entry | TOPS: entries | valid | late | move | big caught | late on big | BOTTOMS: entries | valid | late | move | big caught | late on big |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| at 1h signal | 142 | 49% | $1,342 | $3,534 | 56/257 | $3,171 | 169 | 64% | $1,657 | $7,073 | 74/257 | $3,136 |
-| 15m pullback | 57 | 60% | $1,018 | $2,745 | 29/257 | $2,411 | 58 | 64% | $1,650 | $7,563 | 28/257 | $6,045 |
+| at 1h signal | 142 | 49% | $13 | $35 | 56/257 | $32 | 169 | 64% | $17 | $71 | 74/257 | $31 |
+| 15m pullback | 57 | 60% | $10 | $27 | 29/257 | $24 | 58 | 64% | $17 | $76 | 28/257 | $60 |
 
 ## 1h setup: structure + daily filter — 3y (from Oct 2023)
 
 | entry | TOPS: entries | valid | late | move | big caught | late on big | BOTTOMS: entries | valid | late | move | big caught | late on big |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| at 1h signal | 32 | 44% | $2,216 | $5,913 | 11/32 | $7,481 | 54 | 57% | $2,609 | $8,224 | 13/32 | $8,829 |
-| 15m pullback | 13 | 54% | $1,896 | $4,971 | 4/32 | $7,902 | 20 | 60% | $2,545 | $7,035 | 6/32 | $18,700 |
+| at 1h signal | 32 | 44% | $22 | $59 | 11/32 | $75 | 54 | 57% | $26 | $82 | 13/32 | $88 |
+| 15m pullback | 13 | 54% | $19 | $50 | 4/32 | $79 | 20 | 60% | $25 | $70 | 6/32 | $187 |
 
 ## 1h setup: structure + daily filter — 12m (from Oct 2025)
 
 | entry | TOPS: entries | valid | late | move | big caught | late on big | BOTTOMS: entries | valid | late | move | big caught | late on big |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| at 1h signal | 21 | 52% | $2,165 | $7,873 | 7/8 | $6,434 | 11 | 45% | $1,984 | $5,254 | 2/9 | $6,740 |
-| 15m pullback | 8 | 75% | $2,093 | $7,613 | 3/8 | $7,829 | 3 | 33% | $1,639 | $2,861 | 2/9 | $15,594 |
+| at 1h signal | 21 | 52% | $22 | $79 | 7/8 | $64 | 11 | 45% | $20 | $53 | 2/9 | $67 |
+| 15m pullback | 8 | 75% | $21 | $76 | 3/8 | $78 | 3 | 33% | $16 | $29 | 2/9 | $156 |

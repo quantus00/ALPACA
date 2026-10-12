@@ -56,7 +56,7 @@ use_trend_flip    = true  # higher low confirmed, then close above last swing hi
 [sizing]
 # What the short is placed on. BTC exposure per signal = contracts x btc_per_contract.
 product   = "nano_perp"   # one of the [products.*] tables below
-contracts = 100           # 100 nano = 1 BTC; 10 CME micro = 1 BTC
+contracts = 1             # 1 nano = 0.01 BTC (100 nano = 1 BTC); 1 CME micro = 0.1 BTC
 
 # Per-product contract size and ALL-IN fee per contract per side (in OR out).
 # Exchange fees are from Coinbase Derivatives' schedule; brokerage fees vary —
