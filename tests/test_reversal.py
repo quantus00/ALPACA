@@ -57,3 +57,26 @@ def test_catches_textbook_top():
     t = trades[0]
     assert 120 < t.entry_price < 128 and t.top > 139   # just under the 127.5 neckline
     assert t.pnl_usd > 0
+
+
+def test_bottom_is_mirror_of_top():
+    """The textbook top, flipped upside down, must be found as a bottom at the mirrored price."""
+    from reversal.accuracy import grade_signals, signals_both
+    legs = [(100, 110, 20), (110, 104, 12), (104, 120, 32), (120, 110, 12), (110, 140, 30), (140, 128, 12),
+            (128, 135, 10), (135, 90, 60), (90, 92, 40)]
+    px = np.concatenate([np.linspace(a, b, n, endpoint=False) for a, b, n in legs])
+    px = px + np.where(np.arange(len(px)) % 2, 0.15, -0.15)
+    idx = pd.date_range("2024-01-01", periods=len(px), freq="1h", tz="UTC")
+    up = pd.DataFrame({"open": np.r_[px[0], px[:-1]], "high": px + 0.3, "low": px - 0.3,
+                       "close": px, "volume": 50.0}, index=idx)
+    down = up.copy()            # mirror around 250: tops become bottoms
+    down["open"], down["close"] = 250 - up["open"], 250 - up["close"]
+    down["high"], down["low"] = 250 - up["low"], 250 - up["high"]
+    cfg = load_config()
+    off = {k: False for k in LAYERS}
+    d, di, tops, bottoms = signals_both(down, None, "1h", cfg, off)
+    g = grade_signals(d, di, tops, bottoms, cfg)
+    b = g[g.side == "bottom"]
+    assert len(b) == 1
+    assert abs(b.iloc[0].signal_price - (250 - 127.35)) < 1e-6      # mirror of the top signal
+    assert b.iloc[0].extreme_price < 111 and b.iloc[0].valid

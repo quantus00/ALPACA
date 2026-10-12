@@ -103,9 +103,27 @@ def _pivots(h: np.ndarray, l: np.ndarray, L: int):
     return is_ph, is_pl
 
 
+def invert(df: pd.DataFrame) -> pd.DataFrame:
+    """Mirror prices (x -> -x, high<->low) so the bearish rules detect bullish reversals.
+
+    Every indicator mirrors exactly: RSI -> 100-RSI, MACD -> -MACD, +DI <-> -DI,
+    and "close below its EMA" becomes "close above its EMA".
+    """
+    out = df.copy()
+    out["open"], out["close"] = -df["open"], -df["close"]
+    out["high"], out["low"] = -df["low"], -df["high"]
+    return out
+
+
 # --------------------------------------------------------------------------- engine
-def run(d: pd.DataFrame, cfg: dict, layers: dict | None = None, log=None) -> list[Trade]:
-    """Walk the bars and return every short trade. ``layers`` overrides cfg['layers']."""
+def run(d: pd.DataFrame, cfg: dict, layers: dict | None = None, log=None,
+        signals_only: bool = False) -> list[Trade]:
+    """Walk the bars and return every short trade. ``layers`` overrides cfg['layers'].
+
+    ``signals_only``: don't hold positions — return every bearish reversal signal
+    (entry fields filled, exit fields empty) so accuracy can be scored. Run it on
+    ``invert(df)`` to get bullish (bottom) reversals with the identical rules.
+    """
     lay = dict(cfg["layers"])
     if layers is not None:
         lay.update(layers)
@@ -223,7 +241,12 @@ def run(d: pd.DataFrame, cfg: dict, layers: dict | None = None, log=None) -> lis
                 trig = age > 0 and h[i] >= setup["level"] - rt["tolerance_atr"] * atr_[i] and c[i] < setup["level"]
             else:
                 trig = c[i] < setup["level"]
-            if trig and entry_ok(i):
+            if trig and entry_ok(i) and signals_only:
+                trades.append(Trade(entry_time=t[i], entry_price=c[i], break_level=setup["level"],
+                                    top=setup["top"], top_time=t[setup["top_i"]], entry_i=i))
+                note(i, "signal", f"reversal signal @ {c[i]:,.2f}")
+                setup = None
+            elif trig and entry_ok(i):
                 entry = c[i]
                 stop = min(setup["lh"] + ex["stop_buffer_atr"] * atr_[i], entry * (1 + ex["hard_stop_pct"]))
                 low_since, entry_i = l[i], i

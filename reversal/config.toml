@@ -80,3 +80,13 @@ funding = false
 slippage_usd_per_btc_side = 10.0   # spread/slippage per BTC of exposure, per side
 funding_per_8h            = 0.0    # perp only: fraction of notional paid by the short per 8h
                                    # (positive = shorts receive when longs pay; enter as cost if negative)
+
+[accuracy]
+# How reversal signals are graded (backtest/reversal_accuracy.py).
+# A signal is VALID if, before price closes back beyond the top/bottom it came
+# from (or the next opposite signal), it moves in the signal's direction by at
+# least max(how late the signal was, confirm_atr x ATR at the signal).
+confirm_atr = 2.0
+# A "big real turn" is a swing that reversed by at least this much (hindsight
+# zigzag on highs/lows). Used to count which big turns the detector caught.
+big_turn_pct = 0.10
