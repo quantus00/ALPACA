@@ -19,6 +19,7 @@ import time
 
 from .brokers import get_broker
 from .config import Broker, Config, Instrument
+from .hedge.hook import make_hedge_hook
 from .notifier import Notifier
 from .strategy import StrategyRunner
 
@@ -41,6 +42,7 @@ def _run_poll(cfg: Config) -> None:
     notifier = Notifier()
     runner = StrategyRunner(cfg, notifier)
     broker = get_broker(cfg)
+    hedge = make_hedge_hook(cfg, notifier)   # None unless BOT_HEDGE_PAPER=true
     log = logging.getLogger("poll")
     log.info("Polling every %ss  (%s)", cfg.poll_seconds, cfg.describe())
     while True:
@@ -52,8 +54,12 @@ def _run_poll(cfg: Config) -> None:
                 if res.ok:
                     notifier.notify_entry(sig.action, res.symbol, sig.price,
                                           cfg.contract_size)
+                    if hedge:
+                        hedge.on_primary_entry(sig.action, sig.price)
                 else:
                     log.error("Order failed: %s", res.error)
+            if hedge:
+                hedge.on_tick()
         except Exception:  # noqa: BLE001
             log.exception("poll tick failed")
         time.sleep(cfg.poll_seconds)

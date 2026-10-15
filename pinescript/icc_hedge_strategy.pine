@@ -1,0 +1,409 @@
+//@version=5
+// =============================================================================
+// ICC + HEDGE MODULE — BACKTEST / PAPER ALERTS (TradingView)
+// -----------------------------------------------------------------------------
+// The ICC entry is the SAME rule as multi_timeframe_trend_strategy.pine (4H
+// structure trend + 5m/15m/30m/1H alignment), fired once per alignment like the
+// live Python bot. This script only adds the hedge layer on top.
+//
+// Pairs
+//   Crypto : chart = BTC spot (e.g. COINBASE:BTCUSD). Primary = LONG only.
+//            Hedge = SHORT BTC perp, 1:1 USD notional (blank symbol = chart
+//            price as the perp proxy). Funding = constant hourly input.
+//   Forex  : chart = FX:EURUSD. Hedge = FX:USDCHF in the SAME direction, sized so
+//            its USD units offset EUR/USD's USD exposure. Correlation gate.
+//
+// Rules (all inputs; defaults mirror bot/hedge/hedge_config.toml)
+//   Trigger : 1h close moves 1.0 x ATR(14) against entry, OR closes beyond the
+//             ICC correction low/high (last confirmed 1h swing before entry).
+//   Gate    : forex only — rolling 30-day corr(EURUSD, USDCHF 1h returns) < -0.80
+//             else no hedge, normal stop.
+//   Lift    : 1h ICC continuation (1h trend agrees + close through last 1h swing)
+//             AND close reclaims the trigger level -> close hedge, keep primary.
+//   Cut     : 4H structure flips against primary -> close primary, trail hedge
+//             with a 1x ATR(1h) stop.
+//   Limits  : combined loss 2% of account, 72h (crypto) / 5 trading days (forex),
+//             crypto funding paid > 0.5% of notional -> close both legs.
+//   One hedge per primary, never stacked. After a lift, the trigger is a stop.
+//
+// "Variant" input = the three backtest versions:
+//   (a) ICC + normal stop   (b) ICC + hedge   (c) ICC + hedge, no corr gate
+//
+// READ THE TABLE, NOT THE STRATEGY TESTER, for the comparison: Pine can only hold
+// one net position per symbol, so the Strategy Tester shows the PRIMARY leg only
+// (gross). The bottom-right table is the combined primary + hedge ledger, net of
+// fees and funding.
+//
+// Alerts: every PRIMARY_OPEN / HEDGE_OPEN / HEDGE_SKIPPED / HEDGE_LIFT /
+// PRIMARY_CUT / HEDGE_TRAIL_EXIT / LIMIT_CLOSE / PRIMARY_STOP / PRIMARY_EXIT fires
+// alert() with a JSON body including the reason. Create ONE alert on this script
+// with "Any alert() function call" for a paper log. Nothing here places orders.
+//
+// RUN ON THE 1H CHART. Sub-hour alignment TFs need sub-hour history; if
+// TradingView doesn't have 12 months of 5m data on your plan, untick "Include
+// 5m/15m/30m" to backtest on 4H + 1H only (matches backtest/hedge_backtest.py).
+// =============================================================================
+strategy("ICC + Hedge — Backtest", overlay=true, initial_capital=10000,
+     default_qty_type=strategy.fixed, default_qty_value=1, pyramiding=0,
+     commission_value=0, calc_on_every_tick=false, process_orders_on_close=true,
+     max_labels_count=500)
+
+if timeframe.period != "60"
+    runtime.error("ICC + Hedge: run this script on the 1h chart.")
+
+// ----------------------------------------------------------------------------- Inputs: setup
+grpSet   = "Setup"
+variant  = input.string("(b) ICC + hedge", "Variant", group=grpSet,
+     options=["(a) ICC + normal stop", "(b) ICC + hedge", "(c) ICC + hedge, no corr gate"])
+pairSel  = input.string("Crypto", "Pair", options=["Crypto", "Forex"], group=grpSet,
+     tooltip="Crypto: chart BTC spot. Forex: chart FX:EURUSD.")
+cryptoHedgeSym = input.string("", "Crypto hedge symbol (blank = chart price as perp proxy)", group=grpSet)
+fxHedgeSym = input.string("FX:USDCHF", "Forex hedge symbol", group=grpSet)
+monthsBack = input.int(12, "Backtest window: last N months (0 = all)", minval=0, group=grpSet)
+
+// ----------------------------------------------------------------------------- Inputs: ICC entry (unchanged)
+grpStruct = "ICC entry (unchanged)"
+pivotLen  = input.int(5, "Pivot lookback (bars each side)", minval=1, group=grpStruct)
+trendTF   = input.timeframe("240", "Trend timeframe", group=grpStruct)
+requireAlign = input.bool(true, "Require alignment", group=grpStruct)
+useLTF    = input.bool(true, "Include 5m/15m/30m in alignment", group=grpStruct,
+     tooltip="Untick only if your TradingView plan lacks 12 months of sub-hour history.")
+tf1 = input.timeframe("5",  "Align TF 1", group=grpStruct)
+tf2 = input.timeframe("15", "Align TF 2", group=grpStruct)
+tf3 = input.timeframe("30", "Align TF 3", group=grpStruct)
+tf4 = input.timeframe("60", "Align TF 4", group=grpStruct)
+
+// ----------------------------------------------------------------------------- Inputs: hedge rules
+grpH      = "Hedge rules"
+atrLen    = input.int(14, "ATR length (1h)", minval=1, group=grpH)
+atrMult   = input.float(1.0, "Trigger: ATR multiple against entry", step=0.1, group=grpH)
+atrAtEntry = input.bool(true, "Freeze ATR at entry", group=grpH)
+useCorrBrk = input.bool(true, "Trigger: close beyond ICC correction low/high", group=grpH)
+reqCont   = input.bool(true, "Lift: require 1h ICC continuation", group=grpH)
+cont1hTrend = input.bool(true, "Lift: continuation needs 1h trend agreement", group=grpH)
+reqReclaim = input.bool(true, "Lift: require reclaim of trigger level", group=grpH)
+trailMult = input.float(1.0, "Cut: hedge trailing stop (x ATR 1h)", step=0.1, group=grpH)
+corrThr   = input.float(-0.80, "Forex corr gate: hedge only if corr <", step=0.01, group=grpH)
+corrDays  = input.int(30, "Forex corr window (days)", minval=2, group=grpH)
+
+grpL      = "Hard limits"
+maxLossPct = input.float(2.0, "Max combined loss (% of account)", step=0.1, group=grpL)
+maxHoursC = input.int(72, "Max hedge duration crypto (hours)", group=grpL)
+maxDaysF  = input.int(5, "Max hedge duration forex (trading days)", group=grpL)
+maxFundPct = input.float(0.5, "Max funding paid (% of notional, crypto)", step=0.05, group=grpL)
+
+grpC      = "Account & costs"
+equityUsd = input.float(10000, "Account equity (USD)", group=grpC)
+orderUsd  = input.float(10000, "Primary notional (USD)", group=grpC)
+spotFee   = input.float(0.40, "BTC spot fee % per side", step=0.01, group=grpC)
+perpFee   = input.float(0.05, "BTC perp fee % per side", step=0.01, group=grpC)
+fundRate  = input.float(0.001, "Perp funding % per interval (+ = longs pay shorts)", step=0.0005, group=grpC)
+fundIntH  = input.int(1, "Funding interval (hours)", minval=1, group=grpC)
+eurPips   = input.float(1.0, "EURUSD cost (pips per side)", step=0.1, group=grpC)
+chfPips   = input.float(1.5, "USDCHF cost (pips per side)", step=0.1, group=grpC)
+showLbl   = input.bool(true, "Label hedge events on chart", group=grpC)
+
+isFx     = pairSel == "Forex"
+isStop   = variant == "(a) ICC + normal stop"
+gateOn   = variant == "(b) ICC + hedge"
+PIP      = 0.0001
+
+// ----------------------------------------------------------------------------- Structure engine (same as existing scripts)
+f_struct() =>
+    ph = ta.pivothigh(pivotLen, pivotLen)
+    pl = ta.pivotlow(pivotLen, pivotLen)
+    var float lph = na
+    var float pph = na
+    var float lpl = na
+    var float ppl = na
+    var int   st  = 0
+    if not na(ph)
+        pph := lph
+        lph := ph
+    if not na(pl)
+        ppl := lpl
+        lpl := pl
+    hh = not na(lph) and not na(pph) and lph > pph
+    lh = not na(lph) and not na(pph) and lph < pph
+    hl = not na(lpl) and not na(ppl) and lpl > ppl
+    ll = not na(lpl) and not na(ppl) and lpl < ppl
+    if hh and hl and st != 1
+        st := 1
+    if lh and ll and st != -1
+        st := -1
+    [st, lph, lpl]
+
+f_state() =>
+    [s, _h, _l] = f_struct()
+    s
+
+htf = request.security(syminfo.tickerid, trendTF, f_state(), lookahead=barmerge.lookahead_off)
+a1  = request.security(syminfo.tickerid, tf1, f_state(), lookahead=barmerge.lookahead_off)
+a2  = request.security(syminfo.tickerid, tf2, f_state(), lookahead=barmerge.lookahead_off)
+a3  = request.security(syminfo.tickerid, tf3, f_state(), lookahead=barmerge.lookahead_off)
+a4  = request.security(syminfo.tickerid, tf4, f_state(), lookahead=barmerge.lookahead_off)
+[st1h, swHi, swLo] = f_struct()          // chart = 1h: 1h trend + last confirmed 1h swings
+
+ltfUp   = not useLTF or (a1 == 1 and a2 == 1 and a3 == 1)
+ltfDn   = not useLTF or (a1 == -1 and a2 == -1 and a3 == -1)
+alignUp = not requireAlign or (ltfUp and a4 == 1)
+alignDn = not requireAlign or (ltfDn and a4 == -1)
+sigDir  = htf == 1 and alignUp ? 1 : htf == -1 and alignDn ? -1 : 0
+
+// ----------------------------------------------------------------------------- Hedge leg + features
+hedgeTicker = isFx ? fxHedgeSym : (str.length(cryptoHedgeSym) > 0 ? cryptoHedgeSym : syminfo.tickerid)
+[hO, hH, hL, hC] = request.security(hedgeTicker, "60", [open, high, low, close], lookahead=barmerge.lookahead_off)
+hRet  = request.security(hedgeTicker, "60", close / close[1] - 1, lookahead=barmerge.lookahead_off)
+pRet  = close / close[1] - 1
+corrLen = math.max(3, math.round(corrDays * 24 * 5 / 7))   // FX trades ~5 of 7 days
+corrRaw = ta.correlation(pRet, hRet, corrLen)
+corr  = isFx ? corrRaw : na
+atr   = ta.atr(atrLen)
+
+windowStart = monthsBack == 0 ? 0 : timenow - monthsBack * 30.4375 * 86400000
+inWin = time >= windowStart
+
+f_cost(bool primaryLeg, float units, float px) =>
+    isFx ? (primaryLeg ? units * PIP * eurPips : units * PIP * chfPips / px) : units * px * (primaryLeg ? spotFee : perpFee) / 100.0
+
+f_hpnl(int side, float units, float entry, float px) =>
+    isFx ? side * units * (px - entry) / px : side * units * (px - entry)
+
+f_log(string kind, string reason, float px, bool above) =>
+    msg = '{"mode":"PAPER","event":"' + kind + '","reason":"' + reason + '","symbol":"' + syminfo.ticker +
+         '","hedge":"' + hedgeTicker + '","price":' + str.tostring(px) + ',"time":' + str.tostring(time_close) + '}'
+    alert(msg, alert.freq_once_per_bar_close)
+    if showLbl
+        label.new(bar_index, above ? high : low, kind + "\n" + reason,
+             style=above ? label.style_label_down : label.style_label_up, size=size.tiny,
+             color=color.new(kind == "HEDGE_OPEN" ? color.orange : kind == "HEDGE_LIFT" ? color.teal :
+             kind == "PRIMARY_CUT" ? color.red : kind == "LIMIT_CLOSE" ? color.purple : color.gray, 10),
+             textcolor=color.white)
+
+// ----------------------------------------------------------------------------- Ledger state
+var int   phase    = 0      // 0 flat, 1 primary only, 2 hedged, 3 hedge only (after cut)
+var int   pSide    = 0
+var float pUnits   = na
+var float pEntry   = na
+var int   hSide    = 0
+var float hUnits   = na
+var float hEntry   = na
+var bool  hedgeUsed = false
+var float atrEntry = na
+var float corrLvl  = na
+var float trigLvl  = na
+var float trail    = na
+var int   hOpenT   = na
+var int   hBars    = 0
+var float realized = 0.0
+var float fees     = 0.0
+var float fundPaid = 0.0
+var float hHours   = 0.0
+var int   armDir   = 0
+
+var float netTotal = 0.0
+var float feeTotal = 0.0
+var float fundTotal = 0.0
+var int   nSetups  = 0
+var int   nWins    = 0
+var int   nHedges  = 0
+var int   nSkips   = 0
+var int   nLifts   = 0
+var int   nCuts    = 0
+var int   nStops   = 0
+var int   nLimLoss = 0
+var int   nLimDur  = 0
+var int   nLimFund = 0
+var int   nHedgedSetups = 0
+var float hHoursTotal = 0.0
+var float peakEq   = 0.0
+var float maxDD    = 0.0
+
+finished = false
+finReason = ""
+
+// ----------------------------------------------------------------------------- Manage open setup
+if phase == 1
+    if htf == -pSide
+        realized += pSide * pUnits * (close - pEntry)
+        fees += f_cost(true, pUnits, close)
+        strategy.close("Primary", comment="4H exit")
+        f_log("PRIMARY_EXIT", "4h structure broke against primary", close, pSide == 1)
+        finished := true
+        finReason := "4h structure exit"
+    else
+        atrRef = atrAtEntry ? atrEntry : atr
+        atrLvl = pEntry - pSide * atrMult * atrRef
+        hitAtr = (close - atrLvl) * pSide <= 0
+        hitCorr = useCorrBrk and not na(corrLvl) and (close - corrLvl) * pSide < 0
+        if hitAtr or hitCorr
+            why = hitAtr and hitCorr ? "ATR move + correction break" : hitAtr ? str.tostring(atrMult) + "x ATR(1h) against" : "closed beyond ICC correction " + (pSide == 1 ? "low" : "high")
+            lvl = hitAtr and hitCorr ? (pSide == 1 ? math.max(atrLvl, corrLvl) : math.min(atrLvl, corrLvl)) : hitAtr ? atrLvl : corrLvl
+            gateFail = isFx and gateOn and (na(corr) or corr >= corrThr)
+            if not isStop and not hedgeUsed and not gateFail
+                usd = pUnits * close
+                hSide := isFx ? pSide : -pSide
+                hUnits := isFx ? usd : usd / hC
+                hEntry := hC
+                fees += f_cost(false, hUnits, hC)
+                hedgeUsed := true
+                trigLvl := lvl
+                hOpenT := time_close
+                hBars := 0
+                phase := 2
+                nHedges += 1
+                f_log("HEDGE_OPEN", why + (isFx ? " | corr " + str.tostring(corr, "#.##") : ""), close, pSide == -1)
+            else
+                if gateFail
+                    nSkips += 1
+                    f_log("HEDGE_SKIPPED", "corr gate: " + (na(corr) ? "n/a" : str.tostring(corr, "#.###")) + " not below " + str.tostring(corrThr), close, pSide == 1)
+                realized += pSide * pUnits * (close - pEntry)
+                fees += f_cost(true, pUnits, close)
+                strategy.close("Primary", comment="Stop")
+                nStops += 1
+                f_log("PRIMARY_STOP", "normal stop: " + why + (hedgeUsed ? " (hedge already used)" : ""), close, pSide == 1)
+                finished := true
+                finReason := "normal stop"
+
+else if phase == 2 or phase == 3
+    hBars += 1
+    stopped = false
+    // Phase 3: trailing stop from the previous bar, checked intrabar first.
+    if phase == 3
+        hit = hSide == -1 ? hH >= trail : hL <= trail
+        if hit
+            fill = hSide == -1 ? math.max(hO, trail) : math.min(hO, trail)
+            realized += f_hpnl(hSide, hUnits, hEntry, fill)
+            fees += f_cost(false, hUnits, fill)
+            hHours += (time_close - hOpenT) / 3600000.0
+            f_log("HEDGE_TRAIL_EXIT", "hedge trailing stop hit", fill, hSide == -1)
+            stopped := true
+            finished := true
+            finReason := "hedge trailed out after cut"
+    if not stopped
+        // Funding on the perp hedge.
+        if not isFx and math.floor(time_close / 3600000) % fundIntH == 0
+            fundPaid += hSide * fundRate / 100.0 * hUnits * hC
+        pOpen = phase == 2
+        setupPnl = realized - fees - fundPaid + (pOpen ? pSide * pUnits * (close - pEntry) : 0.0) + f_hpnl(hSide, hUnits, hEntry, hC)
+        overDur = isFx ? hBars >= maxDaysF * 24 : (time_close - hOpenT) / 3600000.0 >= maxHoursC
+        overFund = not isFx and fundPaid > maxFundPct / 100.0 * hUnits * hC
+        overLoss = setupPnl <= -maxLossPct / 100.0 * equityUsd
+        if overLoss or overDur or overFund
+            limWhy = overLoss ? "max combined loss " + str.tostring(maxLossPct) + "%" : overDur ? "max hedge duration" : "funding > " + str.tostring(maxFundPct) + "% of notional"
+            if overLoss
+                nLimLoss += 1
+            else if overDur
+                nLimDur += 1
+            else
+                nLimFund += 1
+            if pOpen
+                realized += pSide * pUnits * (close - pEntry)
+                fees += f_cost(true, pUnits, close)
+                strategy.close("Primary", comment="Limit")
+            realized += f_hpnl(hSide, hUnits, hEntry, hC)
+            fees += f_cost(false, hUnits, hC)
+            hHours += (time_close - hOpenT) / 3600000.0
+            f_log("LIMIT_CLOSE", limWhy, close, true)
+            finished := true
+            finReason := limWhy
+        else if phase == 2 and htf == -pSide
+            realized += pSide * pUnits * (close - pEntry)
+            fees += f_cost(true, pUnits, close)
+            strategy.close("Primary", comment="Cut")
+            trail := hC - hSide * trailMult * atr
+            phase := 3
+            nCuts += 1
+            f_log("PRIMARY_CUT", "4h structure broke against primary; trailing hedge " + str.tostring(trailMult) + "x ATR", close, pSide == 1)
+        else if phase == 2
+            contSwing = pSide == 1 ? (not na(swHi) and close > swHi) : (not na(swLo) and close < swLo)
+            contOK = not reqCont or ((not cont1hTrend or st1h == pSide) and contSwing)
+            reclaimOK = not reqReclaim or (close - trigLvl) * pSide > 0
+            if contOK and reclaimOK
+                realized += f_hpnl(hSide, hUnits, hEntry, hC)
+                fees += f_cost(false, hUnits, hC)
+                hHours += (time_close - hOpenT) / 3600000.0
+                nLifts += 1
+                phase := 1
+                hUnits := na
+                f_log("HEDGE_LIFT", "1h ICC continuation + reclaimed trigger level", close, pSide == -1)
+        else if phase == 3
+            nt = hC - hSide * trailMult * atr
+            trail := hSide == -1 ? math.min(trail, nt) : math.max(trail, nt)
+
+// ----------------------------------------------------------------------------- Close out a finished setup
+if finished
+    net = realized - fees - fundPaid
+    netTotal += net
+    feeTotal += fees
+    fundTotal += fundPaid
+    nSetups += 1
+    nWins += net > 0 ? 1 : 0
+    if hedgeUsed
+        nHedgedSetups += 1
+        hHoursTotal += hHours
+    phase := 0
+    pSide := 0
+    pUnits := na
+    hUnits := na
+    hedgeUsed := false
+    corrLvl := na
+    trigLvl := na
+    trail := na
+    realized := 0.0
+    fees := 0.0
+    fundPaid := 0.0
+    hHours := 0.0
+
+// ----------------------------------------------------------------------------- ICC entry (fire once per alignment)
+if sigDir == 0
+    armDir := 0
+else if sigDir != armDir
+    armDir := sigDir
+    want = isFx ? sigDir : (sigDir == 1 ? 1 : 0)
+    if want != 0 and inWin and phase == 0 and not na(atr)
+        pSide := want
+        pUnits := orderUsd / close
+        pEntry := close
+        atrEntry := atr
+        cl = want == 1 ? swLo : swHi
+        corrLvl := not na(cl) and (cl - close) * want < 0 ? cl : na
+        fees += f_cost(true, pUnits, close)
+        phase := 1
+        strategy.entry("Primary", want == 1 ? strategy.long : strategy.short, qty=pUnits)
+        f_log("PRIMARY_OPEN", "ICC entry " + (want == 1 ? "long" : "short"), close, want == -1)
+
+// ----------------------------------------------------------------------------- Equity / drawdown (closed + open MTM)
+openPnl = phase == 0 ? 0.0 : realized - fees - fundPaid + (phase <= 2 and not na(pUnits) ? pSide * pUnits * (close - pEntry) : 0.0) + (phase >= 2 and not na(hUnits) ? f_hpnl(hSide, hUnits, hEntry, hC) : 0.0)
+eq = netTotal + openPnl
+peakEq := math.max(peakEq, eq)
+maxDD := math.max(maxDD, peakEq - eq)
+
+// ----------------------------------------------------------------------------- Plots
+plot(phase >= 1 and phase <= 2 ? (atrAtEntry ? pEntry - pSide * atrMult * atrEntry : na) : na, "ATR trigger", color.orange, style=plot.style_linebr)
+plot(phase >= 1 and phase <= 2 ? corrLvl : na, "ICC correction level", color.yellow, style=plot.style_linebr)
+plot(phase == 3 ? trail : na, "Hedge trail stop", color.red, style=plot.style_linebr)
+bgcolor(phase == 2 ? color.new(color.orange, 88) : phase == 3 ? color.new(color.red, 88) : na)
+
+// ----------------------------------------------------------------------------- Results table
+var table t = table.new(position.bottom_right, 2, 13, border_width=1)
+f_row(int r, string k, string v) =>
+    table.cell(t, 0, r, k, text_color=color.white, bgcolor=color.new(color.black, 20), text_size=size.small)
+    table.cell(t, 1, r, v, text_color=color.white, bgcolor=color.new(color.black, 40), text_size=size.small)
+
+if barstate.islast
+    wr = nSetups > 0 ? 100.0 * nWins / nSetups : 0.0
+    avgH = nHedgedSetups > 0 ? hHoursTotal / nHedgedSetups : 0.0
+    f_row(0, "Variant", variant + (not isFx and not isStop ? " (gate n/a for BTC)" : ""))
+    f_row(1, "Setups (closed)", str.tostring(nSetups))
+    f_row(2, "Win rate", str.tostring(wr, "#.#") + "%")
+    f_row(3, "Net P&L (fees+funding)", "$" + str.tostring(netTotal, "#,##0.00"))
+    f_row(4, "Max drawdown", "$" + str.tostring(maxDD, "#,##0.00"))
+    f_row(5, "Fees", "$" + str.tostring(feeTotal, "#,##0.00"))
+    f_row(6, "Funding paid (+paid/-recv)", "$" + str.tostring(fundTotal, "#,##0.00"))
+    f_row(7, "Hedges / gate skips", str.tostring(nHedges) + " / " + str.tostring(nSkips))
+    f_row(8, "Avg hedge duration", str.tostring(avgH, "#.#") + " h")
+    f_row(9, "Lifts / cuts / stops", str.tostring(nLifts) + " / " + str.tostring(nCuts) + " / " + str.tostring(nStops))
+    f_row(10, "Limit: loss/dur/funding", str.tostring(nLimLoss) + " / " + str.tostring(nLimDur) + " / " + str.tostring(nLimFund))
+    f_row(11, "Open setup MTM", "$" + str.tostring(openPnl, "#,##0.00"))
+    f_row(12, "Corr (forex)", isFx ? str.tostring(corr, "#.###") : "n/a")

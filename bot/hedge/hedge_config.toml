@@ -1,0 +1,64 @@
+# =============================================================================
+# ICC hedge module — every tunable number lives here.
+# -----------------------------------------------------------------------------
+# Read by bot/hedge (paper trading) and backtest/hedge_backtest.py.
+# Override the path with BOT_HEDGE_CONFIG=/path/to/file.toml.
+# PAPER TRADING ONLY: the module never sends hedge orders to a broker.
+# =============================================================================
+
+[safety]
+# Must stay false. Live hedge orders are not implemented and raise even if this
+# is flipped; it exists only so a future live path has an explicit gate.
+live_trading_approved = false
+paper_log_path = "logs/hedge_events.jsonl"   # one JSON line per hedge event
+
+[account]
+equity_usd = 10000.0              # account size used for the % loss limit
+primary_notional_usd = 10000.0    # USD notional of each primary ICC entry (matches the Pine orderUsd default)
+
+[trigger]
+atr_length = 14                   # ATR(14) on the 1h chart
+atr_mult = 1.0                    # hedge when price moves against the primary by atr_mult x ATR(1h)
+atr_reference = "entry"           # "entry" = ATR frozen at primary entry; "live" = current ATR each bar
+use_correction_break = true       # also trigger on a 1h CLOSE beyond the ICC correction low/high
+pivot_lookback = 5                # swing-pivot lookback (bars each side) — same as BOT_PIVOT_LOOKBACK
+
+[lift]
+# Lift the hedge (keep primary) when BOTH are true on a closed 1h bar:
+#   1. 1h ICC continuation in the primary's direction (1h structure trend agrees
+#      AND close breaks the last confirmed 1h swing high (long) / low (short))
+#   2. close reclaims the hedge trigger level
+require_continuation = true
+continuation_requires_1h_trend = true  # false = a close through the last 1h swing is enough
+require_reclaim = true
+
+[cut]
+# Cut the primary when the 4h structure breaks against it (4h HH/HL -> LH/LL flip,
+# same engine as bot/trend.py). The hedge is then trailed with this stop.
+trail_atr_mult = 1.0              # trailing stop distance = trail_atr_mult x ATR(14, 1h)
+
+[limits]
+max_combined_loss_pct = 2.0       # close both legs if setup P&L <= -2% of account
+max_hedge_hours_crypto = 72       # close both legs after 72h hedged (crypto)
+max_hedge_trading_days_forex = 5  # close both legs after 5 trading days hedged (forex; 24 bars/day)
+max_funding_pct_of_notional = 0.5 # crypto: close both if cumulative funding PAID > 0.5% of hedge notional
+
+[crypto]
+primary_symbol = "BTC-USD"        # spot, LONG only (spot cannot be shorted)
+hedge_symbol = "BTC-PERP-INTX"    # Coinbase nano BTC perp — the only perp/futures venue wired in the bot
+hedge_ratio = 1.0                 # hedge USD notional / primary USD notional (1:1)
+spot_fee_pct = 0.40               # per side, % of notional (Coinbase Advanced taker, mid tier — tune to yours)
+perp_fee_pct = 0.05               # per side, % of notional
+funding_interval_hours = 1        # INTX pays funding hourly
+default_funding_rate_pct = 0.001  # per interval, used when no funding history file is present (+ = longs pay shorts)
+
+[forex]
+primary_symbol = "EURUSD"
+hedge_symbol = "USDCHF"           # SAME direction as the primary (long EUR/USD -> long USD/CHF)
+hedge_ratio = 1.0                 # 1.0 = USD/CHF USD notional equals EUR/USD USD exposure
+eurusd_cost_pips = 1.0            # spread + commission per side
+usdchf_cost_pips = 1.5            # spread + commission per side
+corr_gate_enabled = true          # variant (c) in the backtest turns this off
+corr_threshold = -0.80            # only hedge if rolling corr is BELOW this
+corr_window_days = 30             # rolling window, calendar days of 1h returns
+corr_min_obs = 200                # need at least this many paired 1h returns to trust the corr
