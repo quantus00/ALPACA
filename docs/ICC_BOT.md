@@ -117,6 +117,31 @@ Forward Port → 8787, then click the local URL). Set `ICC_WEB_PORT` to change i
 
 Launcher: `icc-cockpit` (equivalently `scripts/run_web.sh`).
 
+### Trader cockpit — mobile-style parallel app
+
+`icc-trader` is a **second, separate** cockpit (the plain `icc-cockpit` above is
+left untouched). It's a port of the "Trading Cockpit" mobile UI, with its broker
+registry and bot/backtest presets pointed at the ICC engine. Tabs: **Accounts /
+Trade / Bots / Backtest / Files**, a PAPER⇄LIVE toggle, and voice commands.
+
+```bash
+pip install -e '.[web]'
+COCKPIT_TOKEN=pick-a-long-random-string scripts/run_trader.sh   # serves on 8788
+```
+Open `http://<droplet-ip>:8788/?token=pick-a-long-random-string`. It runs
+alongside `icc-cockpit` (8787) — different port, different app.
+
+Safety model (same spirit as the CLI):
+- `mock` broker always works offline for UI testing; `coinbase` / `webull` use
+  ICC's own broker classes under the hood.
+- **PAPER** never sends (ICC brokers refuse when not live). A **LIVE** order
+  requires the red button's second tap → `confirm:"CONFIRM"`, is refused for the
+  seeded **OFF-LIMITS** live Webull accounts, and needs
+  `ICC_I_UNDERSTAND_LIVE_RISK=yes` in the server environment.
+- Bots are ICC presets (BTC spot / ETH spot / BTC futures / Gold futures / BTC
+  perp); each launches `python -m icc_bot` with its own settings and streams its
+  log. ICC does **not** trade options.
+
 The CLI can also fetch instead of using a CSV:
 ```bash
 icc-backtest --fetch --symbol ETH-USD --ltf 15m --days 45 --htf-seconds 3600 --out trades.csv

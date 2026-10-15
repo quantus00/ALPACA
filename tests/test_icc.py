@@ -293,6 +293,65 @@ def test_cockpit_live_order_needs_confirm_and_optin(monkeypatch):
     assert r.status_code == 403
 
 
+# --- trader cockpit (parallel app) -----------------------------------------
+def test_trader_builds_and_serves_page():
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from icc_bot.trader.app import create_app
+    client = TestClient(create_app())
+    assert "ICC Trader" in client.get("/").text
+    h = client.get("/api/health").json()
+    assert h["ok"] is True and "coinbase" in h["brokers"]
+    bots = client.get("/api/bots").json()
+    assert any("ICC" in b["name"] for b in bots)
+    assert client.get("/api/backtests").json()  # non-empty
+
+
+def test_trader_token_gate(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    import icc_bot.trader.config as cfg
+    monkeypatch.setattr(cfg, "ACCESS_TOKEN", "secret")
+    from icc_bot.trader.app import create_app
+    client = TestClient(create_app())
+    assert client.get("/api/bots").status_code == 401
+    assert client.get("/api/bots?token=secret").status_code == 200
+
+
+def test_trader_mock_order_dry_run_not_sent():
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from icc_bot.trader.app import create_app
+    client = TestClient(create_app())
+    r = client.post("/api/order", json={"broker": "mock", "mode": "paper",
+                                        "symbol": "BTC-USD", "side": "buy",
+                                        "qty": 0.01, "dry_run": True}).json()
+    assert r["sent"] is False and "BTC-USD" in r["preview"]
+
+
+def test_trader_live_guards(monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.delenv("ICC_I_UNDERSTAND_LIVE_RISK", raising=False)
+    from icc_bot.trader.app import create_app
+    client = TestClient(create_app())
+    # live without confirm -> 400
+    r = client.post("/api/order", json={"broker": "coinbase", "mode": "live",
+                                        "symbol": "BTC-USD", "side": "buy",
+                                        "qty": 0.01, "dry_run": False})
+    assert r.status_code == 400
+    # live on an OFF-LIMITS account -> 400 refused (even with confirm)
+    r = client.post("/api/order", json={"broker": "webull", "mode": "live",
+                                        "account_id": "03II4F2VGEVM20I38F6EIPCBRA",
+                                        "symbol": "AAPL", "side": "buy", "qty": 1,
+                                        "dry_run": False, "confirm": "CONFIRM"})
+    assert r.status_code == 400 and "OFF-LIMITS" in r.json()["detail"]
+
+
 def test_dry_run_broker_never_sends():
     b = DryRunBroker(equity=5_000)
     from icc_bot.models import Order, Side

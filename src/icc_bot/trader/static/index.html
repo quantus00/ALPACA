@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>ICC Trader</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <span class="brand">⚡ ICC Trader</span>
+  <label class="mode">
+    <input type="checkbox" id="liveToggle"> <span id="modeLabel">PAPER</span>
+  </label>
+</header>
+
+<main>
+  <!-- ACCOUNTS -->
+  <section id="tab-accounts" class="tab active">
+    <div class="row"><button onclick="loadAccounts()">Refresh accounts</button></div>
+    <div id="accounts"></div>
+  </section>
+
+  <!-- TRADE -->
+  <section id="tab-trade" class="tab">
+    <div class="card">
+      <label>Quick asset
+        <select id="t_asset" onchange="pickAsset()">
+          <option value="">— pick an asset —</option>
+          <option value="BTC-USD|coinbase|stock">BTC-USD — Bitcoin spot (Coinbase)</option>
+          <option value="ETH-USD|coinbase|stock">ETH-USD — Ethereum spot (Coinbase)</option>
+          <option value="BIT|coinbase|future">BIT — BTC nano future (Coinbase)</option>
+          <option value="GOL|coinbase|future">GOL — Gold future (Coinbase)</option>
+          <option value="BTC-PERP|coinbase|perp">BTC-PERP — Bitcoin perp (Coinbase)</option>
+        </select></label>
+      <label>Broker
+        <select id="t_broker"><option>mock</option><option>coinbase</option><option>webull</option></select></label>
+      <label>Account ID <input id="t_account" placeholder="account id (optional)"></label>
+      <label>Symbol <input id="t_symbol" placeholder="BTC-USD"></label>
+      <div class="grid2">
+        <label>Side <select id="t_side"><option>buy</option><option>sell</option></select></label>
+        <label>Instrument <select id="t_instr">
+          <option>stock</option><option>future</option><option>perp</option></select></label>
+      </div>
+      <div class="grid2">
+        <label>Qty <input id="t_qty" type="number" placeholder="e.g. 0.001" step="any"></label>
+        <label>Notional $ <input id="t_notional" type="number" placeholder="fractional"></label>
+      </div>
+      <div class="grid2">
+        <label>Type <select id="t_type"><option>market</option><option>limit</option></select></label>
+        <label>Limit price <input id="t_price" type="number" step="any"></label>
+      </div>
+      <label class="chk"><input type="checkbox" id="t_fractional"> Fractional (use Notional)</label>
+      <div class="row">
+        <button type="button" onclick="startVoice()">🎤 Speak a command</button>
+        <label class="chk"><input type="checkbox" id="speakBack" checked> 🔈 Speak back</label>
+      </div>
+      <div id="voice_status" class="hint"></div>
+      <div class="row">
+        <button onclick="preview()">Preview (dry-run)</button>
+        <button class="send" onclick="send()">Confirm &amp; Send</button>
+      </div>
+      <pre id="t_out"></pre>
+    </div>
+  </section>
+
+  <!-- BOTS -->
+  <section id="tab-bots" class="tab">
+    <div class="row"><button onclick="loadBots()">Refresh bots</button></div>
+    <div id="bots"></div>
+    <pre id="botlog"></pre>
+  </section>
+
+  <!-- BACKTESTS -->
+  <section id="tab-backtests" class="tab">
+    <div class="row"><button onclick="loadBacktests()">Refresh backtests</button></div>
+    <div id="backtests"></div>
+    <pre id="bt_out"></pre>
+  </section>
+
+  <!-- FILES -->
+  <section id="tab-files" class="tab">
+    <div class="row">
+      <select id="f_list" onchange="openFile()"></select>
+      <button onclick="loadFiles()">Refresh</button>
+      <button class="send" onclick="saveFile()">Save</button>
+    </div>
+    <textarea id="f_content" spellcheck="false"></textarea>
+    <div class="hint">Edit project .py files here. Changes are saved to the server.</div>
+  </section>
+</main>
+
+<button id="micFab" onclick="startVoice()" title="Speak a command">🎤</button>
+
+<nav class="tabbar">
+  <button data-tab="accounts" class="active">Accounts</button>
+  <button data-tab="trade">Trade</button>
+  <button data-tab="bots">Bots</button>
+  <button data-tab="backtests">Backtest</button>
+  <button data-tab="files">Files</button>
+</nav>
+<script src="/static/app.js"></script>
+</body>
+</html>

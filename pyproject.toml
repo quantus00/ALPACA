@@ -24,6 +24,7 @@ icc-bot = "icc_bot.runner:main"
 icc-discover = "icc_bot.discover:main"
 icc-backtest = "icc_bot.backtest:main"
 icc-cockpit = "icc_bot.cockpit:main"
+icc-trader = "icc_bot.trader.app:main"
 
 [build-system]
 requires = ["hatchling"]

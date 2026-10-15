@@ -1,0 +1,9 @@
+{
+  "name": "ICC Trader",
+  "short_name": "ICC Trader",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0e1117",
+  "theme_color": "#0e1117",
+  "icons": []
+}
