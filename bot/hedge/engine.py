@@ -56,6 +56,19 @@ class Event:
 
 
 @dataclass
+class Fill:
+    """One simulated leg fill. The live executor mirrors these as real orders."""
+    time: int
+    setup_id: int
+    leg: str               # "primary" | "hedge"
+    symbol: str
+    action: str            # "buy" | "sell"
+    units: float
+    price: float
+    opening: bool          # True = opens the leg, False = closes it
+
+
+@dataclass
 class SetupResult:
     setup_id: int
     side: int
@@ -77,6 +90,7 @@ class HedgeEngine:
         self.mode = mode
         self._next_id = 1
         self.events: list[Event] = []
+        self.fills: list[Fill] = []
         self.results: list[SetupResult] = []
         self._reset()
 
@@ -133,6 +147,7 @@ class HedgeEngine:
         self._next_id += 1
         units = units if units is not None else self.s.primary_notional_usd / ctx.close
         self.primary = Leg(self.s.primary_symbol, side, units, ctx.close, True, ctx.close_time)
+        self._fill("primary", self.primary, ctx.close_time, ctx.close, opening=True)
         self.fees += self._cost(True, units, ctx.close, True)
         self.phase = "primary"
         self._side = side
@@ -182,8 +197,14 @@ class HedgeEngine:
     def mark_to_market(self, ctx: BarContext) -> float:
         return 0.0 if self.is_flat else self._setup_pnl(ctx)
 
+    def _fill(self, leg_name: str, leg: Leg, t: int, price: float, opening: bool) -> None:
+        buy = (leg.side == 1) == opening
+        self.fills.append(Fill(t, self.setup_id or 0, leg_name, leg.symbol,
+                               "buy" if buy else "sell", leg.units, price, opening))
+
     def _close_primary(self, t: int, price: float) -> float:
         leg = self.primary
+        self._fill("primary", leg, t, price, opening=False)
         pnl = leg.pnl(price)
         self.realized += pnl
         self.fees += self._cost(True, leg.units, price, True)
@@ -192,6 +213,7 @@ class HedgeEngine:
 
     def _close_hedge(self, t: int, price: float) -> float:
         leg = self.hedge
+        self._fill("hedge", leg, t, price, opening=False)
         pnl = leg.pnl(price)
         self.realized += pnl
         self.fees += self._cost(False, leg.units, price, leg.quote_is_usd)
@@ -221,6 +243,7 @@ class HedgeEngine:
             # Same direction USD/CHF; its USD units offset EUR/USD's USD exposure.
             usd = s.hedge_ratio * p.notional(ctx.close)
             self.hedge = Leg(s.hedge_symbol, p.side, usd, ctx.h_close, False, ctx.close_time)
+        self._fill("hedge", self.hedge, ctx.close_time, ctx.h_close, opening=True)
         self.fees += self._cost(False, self.hedge.units, ctx.h_close, self.hedge.quote_is_usd)
         self.phase = "hedged"
         self.hedge_used = True

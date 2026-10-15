@@ -1,4 +1,4 @@
-# ICC hedge module (PAPER ONLY)
+# ICC hedge module (paper by default)
 
 "Hedge when the trade goes against me", layered on the existing ICC entry. The
 module never changes how entries are decided, and it never sends a hedge order
@@ -58,8 +58,20 @@ Keep the bot in its default dry-run mode. The hedge module simulates both legs i
 `HEDGE_SKIPPED`, `HEDGE_LIFT`, `PRIMARY_CUT`, `HEDGE_TRAIL_EXIT`, `LIMIT_CLOSE`,
 `PRIMARY_STOP`, `PRIMARY_EXIT`, `FUNDING`, `SETUP_CLOSED`). Each line carries its reason.
 Discord/Telegram get the same lines if `NOTIFY_*` is set.
-`safety.live_trading_approved` stays `false`, and the live order path raises
-`NotImplementedError` regardless.
+## Live hedge orders (off by default)
+
+Live trading needs **both** switches on: `safety.live_trading_approved = true` in
+`hedge_config.toml`, **and** the bot started with `--live`. If either one is off, everything stays paper.
+When live, `live.py` turns each simulated fill into a real order. Primary closes
+(stop / cut / limit) go out as spot sells, and hedge opens/closes go to `crypto.hedge_symbol` on Coinbase.
+The primary entry is never re-sent. Guards: `max_hedge_btc` caps any single hedge order,
+`hedge_contract_btc` / `hedge_size_increment` round the order size, and the module **halts**
+(sends nothing more, logs CRITICAL, notifies) on the first failed order.
+
+Before going live, check that `hedge_symbol` matches your account's real perp product id.
+`BTC-PERP-INTX` is Coinbase International; US accounts use a nano perp like `BIP-…-CDE`,
+sized at 0.01 BTC per contract, which means setting `hedge_contract_btc = 0.01` and
+`hedge_size_increment = 1`.
 
 ## Backtest
 

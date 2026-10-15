@@ -238,3 +238,62 @@ def test_backtest_runs_end_to_end(tmp_path):
     hb.main(["--data-dir", str(tmp_path), "--months", "3", "--out", str(out), "--events", str(evs)])
     text = out.read_text()
     assert "(a) ICC + normal stop" in text and "(c) ICC + hedge, no corr gate" in text
+
+
+# --------------------------------------------------------------------------- live executor
+class _FakeBroker:
+    def __init__(self, fail=False):
+        self.orders, self.fail = [], fail
+
+    def place_order(self, side, size):
+        from bot.brokers.base import OrderResult
+        self.orders.append((side, size))
+        return OrderResult(ok=not self.fail, broker="fake", symbol="X", side=side, size=size,
+                           order_id="1", error="boom" if self.fail else None)
+
+
+def _live(**kw):
+    from bot.config import Config
+    from bot.hedge.live import LiveExecutor
+    cfg = Config()
+    cfg.dry_run = False
+    s = crypto(live_trading_approved=True, default_funding_rate_pct=0.0, **kw)
+    p, h = _FakeBroker(), _FakeBroker()
+    return s, LiveExecutor(cfg, s, primary_broker=p, hedge_broker=h), p, h
+
+
+def test_live_requires_both_switches():
+    from bot.config import Config
+    from bot.hedge.live import LiveExecutor, live_allowed
+    cfg = Config()
+    assert cfg.dry_run and not live_allowed(cfg, crypto(live_trading_approved=True))
+    cfg.dry_run = False
+    assert not live_allowed(cfg, crypto(live_trading_approved=False))
+    try:
+        LiveExecutor(cfg, crypto(), primary_broker=_FakeBroker(), hedge_broker=_FakeBroker())
+    except RuntimeError:
+        return
+    raise AssertionError("executor must refuse without approval")
+
+
+def test_live_mirrors_fills_hedge_then_cut():
+    s, ex, p, h = _live()
+    eng = HedgeEngine(s)
+    eng.open_primary(ctx(0, 100_000), side=1, units=0.01)
+    eng.on_bar(ctx(1, 99_890))                      # hedge open
+    eng.on_bar(ctx(2, 99_700, t4=-1))               # cut primary
+    eng.on_bar(ctx(3, 99_750, high=99_900))         # trail hit
+    for f in eng.fills:
+        assert ex.execute(f)
+    assert p.orders == [("sell", 0.01)]             # entry not re-sent, cut sells spot
+    assert h.orders == [("sell", 0.01), ("buy", 0.01)]
+
+
+def test_live_halts_on_failure_and_size_guard():
+    s, ex, p, h = _live(max_hedge_btc=0.005)
+    eng = HedgeEngine(s)
+    eng.open_primary(ctx(0, 100_000), side=1, units=0.01)
+    eng.on_bar(ctx(1, 99_890))
+    assert not ex.execute(eng.fills[-1]) and ex.halted   # 0.01 BTC > guard
+    assert h.orders == []
+    assert not ex.execute(eng.fills[0]) and p.orders == []   # halted: nothing else sent

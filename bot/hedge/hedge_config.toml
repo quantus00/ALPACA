@@ -7,10 +7,13 @@
 # =============================================================================
 
 [safety]
-# Must stay false. Live hedge orders are not implemented and raise even if this
-# is flipped; it exists only so a future live path has an explicit gate.
+# LIVE ORDERS need BOTH switches: this flag = true AND the bot started with --live.
+# Either one off -> paper only (simulated fills, nothing sent).
 live_trading_approved = false
 paper_log_path = "logs/hedge_events.jsonl"   # one JSON line per hedge event
+max_hedge_btc = 0.25              # refuse any single hedge order larger than this (fat-finger guard)
+hedge_contract_btc = 0.0          # 0 = perp sized in BTC (INTX BTC-PERP). US nano perp: 0.01 BTC/contract
+hedge_size_increment = 0.0001     # round hedge size DOWN to this (BTC, or contracts if hedge_contract_btc > 0)
 
 [account]
 equity_usd = 10000.0              # account size used for the % loss limit

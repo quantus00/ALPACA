@@ -7,8 +7,9 @@ runs them through the shared ``HedgeEngine`` and writes every event (hedge
 open / skip / lift / cut / limit close / funding) with its reason to the log and
 to a JSONL file.
 
-PAPER ONLY. Hedge fills are simulated at the 1h close; no hedge order is ever
-sent to a broker. ``_send_live`` exists only to make that explicit.
+Paper by default: fills are simulated at the 1h close. With a ``LiveExecutor``
+(only built when live_trading_approved=true AND the bot runs --live) every
+simulated fill is mirrored as a real order; see live.py.
 
 Crypto only: no broker wired into this bot can trade EUR/USD and USD/CHF, and
 the bot has no FX candle feed, so the forex hedge is backtest-only.
@@ -33,8 +34,13 @@ WARMUP_BARS = 300
 
 class PaperHedgeManager:
     def __init__(self, primary_symbol: str = "BTC-USD", notifier=None,
-                 config_path: str | None = None, candle_fn=get_candles) -> None:
+                 config_path: str | None = None, candle_fn=get_candles,
+                 primary_units: float | None = None, executor=None) -> None:
         self.s = hcfg.load("crypto", config_path)
+        self.primary_units = primary_units      # the bot's real order size (BTC)
+        self.executor = executor                # LiveExecutor, or None = paper
+        self.mode = "LIVE" if executor else "PAPER"
+        self._fills_done = 0
         self.symbol = primary_symbol
         self.notifier = notifier
         self.candle_fn = candle_fn
@@ -43,7 +49,7 @@ class PaperHedgeManager:
         self.last_ctx = None
         self.last_bar_time: int | None = None
         os.makedirs(os.path.dirname(self.s.paper_log_path) or ".", exist_ok=True)
-        log.info("[PAPER] hedge module active for %s -> hedge %s (log %s)",
+        log.info(f"[{self.mode}] hedge module active for %s -> hedge %s (log %s)",
                  self.symbol, self.s.hedge_symbol, self.s.paper_log_path)
 
     # ----------------------------------------------------------------- feed
@@ -84,7 +90,7 @@ class PaperHedgeManager:
         if self.last_ctx is None or self.last_ctx.atr is None:
             log.warning("[PAPER] not enough 1h history for ATR; hedge not armed")
             return
-        self._record(self.engine.open_primary(self.last_ctx, side=1))
+        self._record(self.engine.open_primary(self.last_ctx, side=1, units=self.primary_units))
 
     def on_tick(self) -> None:
         """Hook: called every poll; processes any newly closed 1h bars. Primary
@@ -93,23 +99,22 @@ class PaperHedgeManager:
 
     # ----------------------------------------------------------------- output
     def _record(self, events: list[Event]) -> None:
+        if self.executor:
+            for f in self.engine.fills[self._fills_done:]:
+                self.executor.execute(f)
+            self._fills_done = len(self.engine.fills)
         for ev in events:
             row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ev.time)),
-                   "mode": "PAPER", "pair": "crypto", **asdict(ev)}
+                   "mode": self.mode, "pair": "crypto", **asdict(ev)}
             with open(self.s.paper_log_path, "a") as fh:
                 fh.write(json.dumps(row, default=str) + "\n")
             if ev.kind == "FUNDING":
                 log.debug("[PAPER] %s %s", ev.kind, ev.data)
                 continue
-            msg = f"[PAPER] setup#{ev.setup_id} {ev.kind}: {ev.reason}"
+            msg = f"[{self.mode}] setup#{ev.setup_id} {ev.kind}: {ev.reason}"
             log.info("%s %s", msg, ev.data)
             if self.notifier and ev.kind != "PRIMARY_OPEN":
                 try:
                     self.notifier._push(msg)
                 except Exception:  # noqa: BLE001
                     log.warning("hedge notify failed", exc_info=True)
-
-    def _send_live(self, *_a, **_k):  # pragma: no cover - deliberately unreachable
-        raise NotImplementedError(
-            "Live hedge orders are disabled. The hedge module is paper-only until "
-            "the owner approves live trading and a live path is reviewed.")

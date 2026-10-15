@@ -58,6 +58,9 @@ class PairSettings:
     # safety
     live_trading_approved: bool = False
     paper_log_path: str = "logs/hedge_events.jsonl"
+    max_hedge_btc: float = 0.25
+    hedge_contract_btc: float = 0.0
+    hedge_size_increment: float = 0.0001
 
     @property
     def is_crypto(self) -> bool:
@@ -93,6 +96,9 @@ def load(pair: str, path: str | os.PathLike | None = None) -> PairSettings:
         max_funding_pct=float(lim["max_funding_pct_of_notional"]),
         live_trading_approved=bool(raw["safety"]["live_trading_approved"]),
         paper_log_path=str(raw["safety"]["paper_log_path"]),
+        max_hedge_btc=float(raw["safety"].get("max_hedge_btc", 0.25)),
+        hedge_contract_btc=float(raw["safety"].get("hedge_contract_btc", 0.0)),
+        hedge_size_increment=float(raw["safety"].get("hedge_size_increment", 0.0001)),
     )
     if pair == "crypto":
         c = raw["crypto"]
