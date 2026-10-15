@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Evaluation questions for the Alpaca MCP server.
+
+  IMPORTANT: These follow the mcp-builder evaluation format, but Alpaca answers
+  depend on live account state (balances, positions, orders) and moving market
+  data, which are neither stable nor verifiable by string comparison over time.
+  The stable, verifiable questions are those about reference data (asset
+  tradability, fractionability, exchange) and market-structure facts.
+
+  The <answer> values below are illustrative placeholders. Before using this as
+  a scored eval, run each question against a real (paper) account with market
+  data access and replace each answer with the verified result. Questions tied
+  to account state should be re-pointed at fixtures you control.
+-->
+<evaluation>
+  <qa_pair>
+    <question>Using the Alpaca assets reference data, is the common stock of Apple (symbol AAPL) marked as fractionable? Answer "yes" or "no".</question>
+    <answer>yes</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>According to Alpaca's asset reference data, on which primary exchange is the symbol AAPL listed?</question>
+    <answer>NASDAQ</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What asset_class value does Alpaca assign to the tradable pair BTC/USD?</question>
+    <answer>crypto</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>When you request the market clock from Alpaca and the market is currently closed for the weekend, what boolean value does the "is_open" field hold?</question>
+    <answer>false</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>An agent submits a limit order via alpaca_create_order but omits the limit_price. What single required field name does the server say is missing?</question>
+    <answer>limit_price</answer>
+  </qa_pair>
+</evaluation>
